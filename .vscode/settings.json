@@ -1,0 +1,15 @@
+{
+    "files.associations": {
+        "ch32fun.h": "c",
+        "mcc.h": "c",
+        "device_config.h": "c",
+        "operations.h": "c",
+        "swi_phy.h": "c",
+        "deque": "cpp",
+        "string": "cpp",
+        "unordered_map": "cpp",
+        "vector": "cpp",
+        "system_error": "cpp",
+        "algorithm": "cpp"
+    },  
+}
