@@ -11,25 +11,27 @@
 
 enum SwiMuxOpcodes_e : uint8_t
 {
-    SMCMD_ZERO         = 0,
-    SMCMD_ReadBytes    = 1,
-    SMCMD_WriteBytes   = 2,
-    SMCMD_GetUID       = 3,
-    SMCMD_RollCall     = 4,
-    SMCMD_ConnectEvent ,
-    SMCMD_GetPresence  = SMCMD_ConnectEvent,
-    SMCMD_HaveUID      ,
-    SMCMD_Sleep        ,
-    SMCMD_Autosleep    ,
-    SMCMD_Ack          ,
-    SMCMD_Nack         ,
+    SMCMD_ZERO       = 0,
+    SMCMD_ReadBytes  = 1,
+    SMCMD_WriteBytes = 2,
+    SMCMD_GetUID     = 3,
+    SMCMD_RollCall   = 4,
+    SMCMD_ConnectEvent,
+    SMCMD_GetPresence = SMCMD_ConnectEvent,
+    SMCMD_HaveUID,
+    SMCMD_Sleep,
+    SMCMD_Autosleep,
+    SMCMD_Ack,
+    SMCMD_Nack,
 };
 
 enum SwiMuxError_e : uint8_t
 {
-    SMERR_None          = 0,
-    SMERR_InProgress    = SMERR_None,
+    SMERR_Ok            = 0,
+    SMERR_InProgress    = SMERR_Ok,
+    SMERR_Done          = 1,
     SMERR_UnkownCommand = 0xC0,
+    SMERR_ERRORS = SMERR_UnkownCommand,
     SMERR_Framing,
     SMERR_WrongEscape,
     SMERR_ReadBytesParams,
@@ -37,12 +39,17 @@ enum SwiMuxError_e : uint8_t
     SMERR_MemOffsetOutOfRange,
     SMERR_ReadLengthOutOfRange,
     SMERR_ReadMemoryFailed,
-    SMERR_ReadEncodingRefused,
+    SMERR_ResponseEncodingFailed,
     SMERR_WriteLengthOutOfRange,
     SMERR_WriteFailed,
     SMERR_GuidUnreadable,
     SMERR_BadCrc,
     SMERR_BADFUNCALL, // critial software error
+};
+
+union __attribute__((packed)) UidType_t {        
+    uint8_t bytes_LE[8];
+    uint64_t value;
 };
 
 struct __attribute__((packed)) SwiMuxCmdRead_t {
@@ -80,17 +87,18 @@ struct __attribute__((packed)) SwiMuxGetUID_t {
     {}
 };
 
+
 struct __attribute__((packed)) SwiMuxRespUID_t {
     SwiMuxOpcodes_e Opcode;
     uint8_t NegOpcode;
-    uint8_t uid[8];
+    UidType_t uid;
     SwiMuxRespUID_t() : Opcode(SMCMD_ZERO), NegOpcode(0) {}
 };
 
 struct __attribute__((packed)) SwiMuxRollCallResult_t {
     SwiMuxOpcodes_e Opcode;
     uint8_t NegOpCode;
-    uint64_t orderedUids[NUMBER_OF_BUSES]; // Six uint64 values, some may be all zeros (absent)
+    UidType_t orderedUids[NUMBER_OF_BUSES]; // Six uint64 values, some may be all zeros (absent)
 };
 
 struct RollCallArray_t {
@@ -132,6 +140,7 @@ template <typename Ret, typename... Args> class SwiMuxDelegateFunc_t<Ret(Args...
         };
     }
 
+
     // allow = nullptr
     SwiMuxDelegateFunc_t(nullptr_t) : obj(nullptr), fn(nullptr) {}
 
@@ -144,7 +153,15 @@ template <typename Ret, typename... Args> class SwiMuxDelegateFunc_t<Ret(Args...
 
 class SwiMuxComms_t {
   public:
-    SwiMuxComms_t() : _calculated_crc(0), _code(0), _block(0), _framedOrEscaped(false) {}
+    SwiMuxComms_t()
+        : _calculated_crc(0),
+#ifdef SWIMUX_USES_COBS
+          _code(0),
+#endif
+          _block(0),
+          _framedOrEscaped(false),
+          _resetOnNextDecode(true)
+    {}
 
     bool encode(const uint8_t* input, size_t len, SwiMuxDelegateFunc_t<void(uint8_t)> resultWriter);
 
@@ -171,9 +188,11 @@ class SwiMuxComms_t {
     static constexpr size_t SWIMUX_BUFF_SIZE = 140;
     StaticBuffer_t<SWIMUX_BUFF_SIZE> _buffer;
     uint32_t _calculated_crc, _crc_consumed;
+#ifdef SWIMUX_USES_COBS
     uint8_t _code;
+#endif
     uint8_t _block;
-    bool _framedOrEscaped;
+    bool _framedOrEscaped, _resetOnNextDecode;
 };
 
 

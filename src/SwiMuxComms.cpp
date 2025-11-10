@@ -1,9 +1,5 @@
 #include "SwiMuxComms.hpp"
 
-#ifndef SWIMUX_USES_COBS
-#define SWIMUX_USES_SLIP
-#endif
-
 
 
 // CRC32 (reflected poly 0xEDB88320), bitwise, small-footprint
@@ -81,14 +77,16 @@ bool SwiMuxComms_t::waitForAckTo(const SwiMuxOpcodes_e opCode, SwiMuxDelegateFun
     do {
         val = readFunc();
         if (val > -1) {
-            decode((uint8_t)val, payload, pLen);
-            if (pLen && payload != nullptr) { // frame ?
-                // We had our response frame, let's check its contents.
-                if (pLen >= 3 && payload[0] == (uint8_t)SwiMuxOpcodes_e::SMCMD_Ack && payload[1] == ((uint8_t)0xFF & ~SMCMD_Ack)
-                  && payload[2] == (uint8_t)opCode) {
-                    return true; // opCode was acknowledged ! Yay
-                } else {
-                    return false; // error in the frame.
+            SwiMuxError_e res = decode((uint8_t)val, payload, pLen);
+            if (res == SMERR_Done) {
+                if (pLen && payload != nullptr) { // frame ?
+                    // We had our response frame, let's check its contents.
+                    if (pLen >= 3 && payload[0] == (uint8_t)SwiMuxOpcodes_e::SMCMD_Ack && payload[1] == ((uint8_t)0xFF & ~SMCMD_Ack)
+                      && payload[2] == (uint8_t)opCode) {
+                        return true; // opCode was acknowledged ! Yay
+                    } else {
+                        return false; // error in the frame.
+                    }
                 }
             }
             // Have some time to receive other bytes.
@@ -105,7 +103,10 @@ void SwiMuxComms_t::reset()
     _framedOrEscaped = false;
     _crc_consumed    = 0;
     _calculated_crc  = crc32_init(); // initialize incremental CRC state
-    _code            = SMERR_None;
+#ifdef SWIMUX_USES_COBS
+    _code = SMERR_Ok;
+#endif
+    _resetOnNextDecode = false;
 }
 
 #ifdef SWIMUX_USES_COBS
@@ -190,6 +191,9 @@ bool SwiMuxComms_t::decode(const uint8_t byte, uint8_t*& payload, size_t& payloa
 {
     payload       = nullptr;
     payloadLength = 0;
+    if (_resetOnNextDecode) {
+        reset();
+    }
 
     // waiting for first _code byte
     if (!_framedOrEscaped) {
@@ -326,13 +330,16 @@ bool SwiMuxComms_t::encode(const uint8_t* input, size_t len, SwiMuxDelegateFunc_
  * @param byte The incoming byte from the serial stream.
  * @param payload A reference to a pointer that will be set to the start of the decoded data.
  * @param payloadLength A reference to a size_t that will be set to the length of the decoded data (excluding the CRC32).
- * @return A value of SwiMuxError_e, preferably @c SwiMuxError_e::SMERR_None if everything went smoothly. * 
+ * @return A value of SwiMuxError_e, preferably @c SwiMuxError_e::SMERR_Ok if everything went smoothly or SMERR_Done if a payload has been decoded * 
  */
 SwiMuxError_e SwiMuxComms_t::decode(const uint8_t byte, uint8_t*& payload, size_t& payloadLength)
 {
     // Safe defaults
     payload       = nullptr;
     payloadLength = 0;
+    if (_resetOnNextDecode) {
+        reset();
+    }
 
     // If we were waiting for an escaped byte, handle it first
     if (_framedOrEscaped) {
@@ -345,16 +352,14 @@ SwiMuxError_e SwiMuxComms_t::decode(const uint8_t byte, uint8_t*& payload, size_
             translated = SwiMuxComms_t::ESC;
         else {
             // Protocol violation after ESC
-            SwiMuxError_e ret = SMERR_Framing;
-            reset();
-            _code = ret;
+            SwiMuxError_e ret  = SMERR_Framing;
+            _resetOnNextDecode = true;
             return ret;
         }
 
         if (!_buffer.append(translated)) {
-            SwiMuxError_e ret = SMERR_Framing;
-            reset();
-            _code = ret;
+            SwiMuxError_e ret  = SMERR_Framing;
+            _resetOnNextDecode = true;
             return ret;
         }
 
@@ -364,7 +369,7 @@ SwiMuxError_e SwiMuxComms_t::decode(const uint8_t byte, uint8_t*& payload, size_
         while (_crc_consumed < known_payload)
             _calculated_crc = crc32_update(_calculated_crc, _buffer[_crc_consumed++]);
 
-        _code = SMERR_InProgress;
+
         return SMERR_InProgress;
     }
 
@@ -376,9 +381,9 @@ SwiMuxError_e SwiMuxComms_t::decode(const uint8_t byte, uint8_t*& payload, size_
 
                 if (count < 4) {
                     // If buffer had bytes but less than CRC => framing error, otherwise just delimiter
-                    SwiMuxError_e ret = (count > 0) ? SMERR_Framing : SMERR_InProgress;
-                    reset();
-                    _code = ret;
+                    SwiMuxError_e ret  = (count > 0) ? SMERR_Framing : SMERR_InProgress;
+                    _resetOnNextDecode = true;
+
                     return ret;
                 }
 
@@ -399,28 +404,24 @@ SwiMuxError_e SwiMuxComms_t::decode(const uint8_t byte, uint8_t*& payload, size_
                     payload       = (uint8_t*)_buffer; // keep same convention you used earlier
                     payloadLength = payload_len;
 
-                    SwiMuxError_e ret = SMERR_None;
-                    reset();
-                    _code = ret;
-                    return ret;
+
+                    _resetOnNextDecode = true;
+                    return SMERR_Done;
                 } else {
-                    SwiMuxError_e ret = SMERR_BadCrc;
-                    reset();
-                    _code = ret;
+                    SwiMuxError_e ret  = SMERR_BadCrc;
+                    _resetOnNextDecode = true;
                     return ret;
                 }
             }
 
         case SwiMuxComms_t::ESC:
             _framedOrEscaped = true;
-            _code            = SMERR_InProgress;
             return SMERR_InProgress;
 
         default:
             if (!_buffer.append(byte)) {
-                SwiMuxError_e ret = SMERR_Framing;
-                reset();
-                _code = ret;
+                SwiMuxError_e ret  = SMERR_Framing;
+                _resetOnNextDecode = true;
                 return ret;
             }
 
@@ -432,7 +433,6 @@ SwiMuxError_e SwiMuxComms_t::decode(const uint8_t byte, uint8_t*& payload, size_
                     _calculated_crc = crc32_update(_calculated_crc, _buffer[_crc_consumed++]);
             }
 
-            _code = SMERR_InProgress;
             return SMERR_InProgress;
     }
 }

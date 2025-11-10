@@ -10,6 +10,7 @@
         "unordered_map": "cpp",
         "vector": "cpp",
         "system_error": "cpp",
-        "algorithm": "cpp"
+        "algorithm": "cpp",
+        "ch32v003hw.h": "c"
     },  
 }

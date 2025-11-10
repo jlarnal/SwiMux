@@ -9,18 +9,30 @@
 #define FUNCONF_DEBUG_HARDFAULT 0
 #define FUNCONF_USE_DEBUGPRINTF 0
 //#define FUNCONF_NULL_PRINTF
-#define FUNCONF_USE_UARTPRINTF 0
+//#define FUNCONF_USE_UARTPRINTF 0
 //#define FUNCONF_UART_PRINTF_BAUD 57600
 #define UART_PINOUT_DEFAULT
+
 
 
 #define SYS_USE_VECTORS 1
 #define CH32V003        1
 
+#define SWIMUX_USES_SLIP (1)
 #define NUMBER_OF_BUSES (6)
 #define RX_BUFF_SIZE (140)
 #define TX_BUFF_SIZE (208)
+
+
 #define ADD_CONSOLE_DEBUGGING
 
+
+#ifdef ADD_CONSOLE_DEBUGGING
+#define dbgp(fmt) printf(fmt)
+#define dbgpf(fmt, ...) printf(fmt, __VA_ARGS__)
+#else
+#define dbgpf(fmt, ...)
+#define dbgp(fmt) 
+#endif
 
 #endif

@@ -2,10 +2,11 @@
 #include <stdio.h>
 #include "debug_macros.h"
 #include "lib_uart.h"
-#include <AT21CS01.h>
+#include "DS28E07.h"
 #include <stdarg.h>
 #include <string.h>
 #include "SwiMuxComms.hpp"
+
 #ifdef ADD_CONSOLE_DEBUGGING
 #include "debugTests.h"
 #endif
@@ -14,7 +15,7 @@
 
 
 
-AT21CS01 devs[NUMBER_OF_BUSES];
+DS28E07 devs[NUMBER_OF_BUSES];
 uint8_t usart_rx_mem[RX_BUFF_SIZE];
 uint8_t usart_tx_mem[TX_BUFF_SIZE];
 
@@ -22,7 +23,7 @@ SwiMuxComms_t decoder;
 
 
 
-const AT21CS01::SwiBusConfig_t busConfig[NUMBER_OF_BUSES] = {
+const OneWire::OneWireConfig_t busesConfigs[NUMBER_OF_BUSES] = {
     // clang-format off
         {GPIOD, 3, nullptr, -1 }, //GPIOA, 1},
         {GPIOD, 2, nullptr, -1 }, //GPIOA, 2},
@@ -79,7 +80,7 @@ bool waitForUartDebug()
 }
 #endif
 
-static uint8_t* payload;
+static uint8_t* g_payload;
 static size_t plength;
 static uint32_t lastReception_ms;
 
@@ -97,17 +98,35 @@ void setup()
     uart_init(usart_rx_mem, RX_BUFF_SIZE, &cfg);
     // Enable all GPIO ports.
     RCC->APB2PCENR |= RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOD | RCC_APB2Periph_GPIOC;
-
+#ifndef ADD_CONSOLE_DEBUGGING
+    for (int idx = 0; idx < NUMBER_OF_BUSES; idx++)
+        devs[idx].begin(busesConfigs[idx]);
+#endif
+    decoder.reset();
 #ifdef ADD_CONSOLE_DEBUGGING
+
+    //funPinMode(PC5, (GPIO_Speed_50MHz | GPIO_CNF_OUT_OD));
+    //funPinMode(PC6, (GPIO_Speed_50MHz | GPIO_CNF_OUT_OD));
+    //funPinMode(PC7, (GPIO_Speed_50MHz | GPIO_CNF_OUT_OD));
+    //funPinMode(PD0, (GPIO_Speed_50MHz | GPIO_CNF_OUT_OD));
+    //funPinMode(PD2, (GPIO_Speed_50MHz | GPIO_CNF_OUT_OD));
+    //funPinMode(PD3, (GPIO_Speed_50MHz | GPIO_CNF_OUT_OD));
+    //
+    //funDigitalWrite(PC5, 0);
+    //funDigitalWrite(PC6, 0);
+    //funDigitalWrite(PC7, 0);
+    //funDigitalWrite(PD0, 0);
+    //funDigitalWrite(PD2, 0);
+    //funDigitalWrite(PD3, 0);
+
+
+
     if (waitForUartDebug()) {
-        doTests();
+        doTests(devs, busesConfigs);
+    } else {
+        printf("\r\nTests skipped.\r\n");
     }
 #endif
-
-    for (int idx = 0; idx < NUMBER_OF_BUSES; idx++)
-        devs[idx].init(busConfig[idx]);
-
-    decoder.reset();
 }
 
 static void processRead(), processWrite(), processGetUID(), processRollCall(), processSleep(bool autoSleep = false), processPresenceReport();
@@ -174,19 +193,19 @@ int main(void)
 
         while (uart_available() > 0) {
             lastReception_ms  = SysTick->CNT;
-            SwiMuxError_e err = decoder.decode(uart_getC(), payload, plength);
-            if (err != SMERR_None) {
+            SwiMuxError_e err = decoder.decode(uart_getC(), g_payload, plength);
+            if (err >= SMERR_ERRORS) {
                 sendNack(err);
                 continue;
             }
-            if (payload == nullptr || plength == 0) {
+            if (g_payload == nullptr || plength == 0) {
                 continue; // still no packet.
             }
-            if ((payload[0] ^ payload[1]) != 0xFF) // Wrong opcode and inverted opcode
+            if ((g_payload[0] ^ g_payload[1]) != 0xFF) // Wrong opcode and inverted opcode
                 continue;
             // Now to intepret the command
             __NOP();
-            switch (payload[0]) {
+            switch (g_payload[0]) {
                 case SMCMD_ReadBytes:
                     processRead();
                     break;
@@ -226,7 +245,7 @@ static void processRead()
         sendNack(SwiMuxError_e::SMERR_ReadBytesParams);
         return;
     }
-    SwiMuxCmdRead_t* pCmd = (SwiMuxCmdRead_t*)payload;
+    SwiMuxCmdRead_t* pCmd = (SwiMuxCmdRead_t*)g_payload;
     if (pCmd->busIndex > 5) {
         sendNack(SwiMuxError_e::SMERR_BusIndexOutOfRange);
         return;
@@ -235,7 +254,7 @@ static void processRead()
         sendNack(SMERR_MemOffsetOutOfRange);
         return;
     }
-    if ((pCmd->offset + pCmd->length) > devs[pCmd->busIndex].memSize()) {
+    if ((pCmd->offset + pCmd->length) > DS28E07::MemorySize_Bytes) {
         sendNack(SMERR_ReadLengthOutOfRange);
         return;
     }
@@ -244,10 +263,10 @@ static void processRead()
     // Copy valid the command as a response header
     memcpy(usart_tx_mem, pCmd, sizeof(SwiMuxCmdRead_t));
 
-    if (SwiError_e::SUCCESS == devs[pCmd->busIndex].readBytes(pCmd->offset, &usart_tx_mem[sizeof(SwiMuxCmdRead_t)], pCmd->length)) {
+    if (devs[pCmd->busIndex].read(pCmd->offset, &usart_tx_mem[sizeof(SwiMuxCmdRead_t)], pCmd->length) == pCmd->length) {
         // Device read successful.
         if (decoder.encode(usart_tx_mem, pCmd->length, uart_writeByte) == false) {
-            sendNack(SMERR_ReadEncodingRefused); // failed to read
+            sendNack(SMERR_ResponseEncodingFailed); // failed to read
         } // otherwise the `encode` success is producing the ACK itself on the serial line.
     } else {
         // Device read failed !
@@ -256,36 +275,35 @@ static void processRead()
 }
 
 
+
 void processRollCall()
 {
-    static uint8_t buff[8];
 
     if (plength < 2) {
         sendNack(SMERR_Framing);
         return;
     }
 
-    SwiMuxRollCallResult_t res;
-    res.Opcode    = SMCMD_RollCall;
-    res.NegOpCode = ~res.Opcode;
+    SwiMuxRollCallResult_t answer;
+    memset(&answer, 0, sizeof(SwiMuxRollCallResult_t));
+    answer.Opcode    = SMCMD_RollCall;
+    answer.NegOpCode = ~answer.Opcode;
     for (uint8_t idx = 0; idx < NUMBER_OF_BUSES; idx++) {
-        if (devs[idx].readUID(buff)) {
-            // Valuate the uid we got
-            memcpy((void*)&res.orderedUids[idx], buff, 8);
-        } else {
-            res.orderedUids[idx] = 0ULL;
+        if (!devs[idx].getUid(answer.orderedUids[idx].bytes_LE)) {
+            answer.orderedUids[idx].value = 0ULL;
         }
     }
-    // Now send `res`
-    if (!decoder.encode((const uint8_t*)&res, sizeof(SwiMuxRollCallResult_t), uart_writeByte)) {
-        sendNack(SMERR_ReadEncodingRefused); // Could not encode `res` .
+    __NOP();
+    // Now send `answer`
+    if (!decoder.encode((const uint8_t*)&answer, sizeof(SwiMuxRollCallResult_t), uart_writeByte)) {
+        sendNack(SMERR_ResponseEncodingFailed); // Could not encode `answer` .
     }
 }
 
 
 static void processWrite()
 {
-    SwiMuxCmdWrite_t* cmd = (SwiMuxCmdWrite_t*)payload;
+    SwiMuxCmdWrite_t* cmd = (SwiMuxCmdWrite_t*)g_payload;
     if (cmd->busIndex > 5) {
         sendNack(SwiMuxError_e::SMERR_BusIndexOutOfRange);
         return;
@@ -294,14 +312,15 @@ static void processWrite()
         sendNack(SMERR_MemOffsetOutOfRange);
         return;
     }
-    if ((cmd->offset + cmd->length) > devs[cmd->busIndex].memSize()) {
+    if ((cmd->offset + cmd->length) > DS28E07::MemorySize_Bytes) {
         sendNack(SMERR_WriteLengthOutOfRange);
         return;
     }
 
-    uint8_t written = 0;
+    uint16_t written = 0;
     // Write data from the first byte after cmd->len (that's our received payload).
-    if (SwiError_e::SUCCESS != devs[cmd->busIndex].writeBytes(cmd->offset, &(&cmd->length)[1], cmd->length, &written)) {
+    written = devs[cmd->busIndex].write((const uint16_t)cmd->offset, &(&cmd->length)[1], cmd->length);
+    if (written != cmd->length) {
         sendNack(SMERR_WriteFailed);
     } else { // Acknowledge with the effective count of written bytes.
         sendAckArgs(SMCMD_WriteBytes, written);
@@ -314,14 +333,20 @@ static void processGetUID()
         sendNack(SMERR_Framing);
         return;
     }
-    SwiMuxGetUID_t* cmd = (SwiMuxGetUID_t*)payload;
+    SwiMuxGetUID_t* cmd = (SwiMuxGetUID_t*)g_payload;
     if (cmd->busIndex > 5) {
         sendNack(SwiMuxError_e::SMERR_BusIndexOutOfRange);
         return;
     }
     SwiMuxRespUID_t uidResp;
-    int resp = devs[cmd->busIndex].readUID(uidResp.uid);
-    if (resp == SwiError_e::SUCCESS) {
+    int retries = 3;
+    while (retries--) {
+        if (devs[cmd->busIndex].getUid(uidResp.uid.bytes_LE)) {
+            if (uidResp.uid.value != UINT64_MAX)
+                break; // good value
+        }
+    }
+    if (uidResp.uid.value != 0 && uidResp.uid.value != UINT64_MAX) {
         // Send the Guid response packet
         sendUid(uidResp);
     } else {
@@ -358,7 +383,7 @@ static void processPresenceReport()
 {
     uint32_t result = 0;
     for (int idx = 0; idx < NUMBER_OF_BUSES; idx++) {
-        result |= devs[idx].isPowered() ? (1 << idx) : 0;
+        result |= devs[idx].get_self_address() ? (1 << idx) : 0;
     }
     SwiMuxCmdPresence_t cmd = { .Opcode = SMCMD_ConnectEvent,
         .NegOpcode                      = (uint8_t)(0xFF & ~SMCMD_ConnectEvent),
@@ -397,4 +422,3 @@ static void sendUid(SwiMuxRespUID_t& uidResp)
     uidResp.NegOpcode = ~SMCMD_HaveUID;
     decoder.encode((uint8_t*)&uidResp, sizeof(SwiMuxRespUID_t), uart_writeByte);
 }
-
