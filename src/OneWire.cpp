@@ -1,4 +1,6 @@
 #include "OneWire.h"
+#include "ExtiHandler.h"
+
 
 
 static bool isGpioPort(GPIO_TypeDef* port)
@@ -22,6 +24,15 @@ static bool isGpioPort(GPIO_TypeDef* port)
       || port == GPIOE
 #endif
       ;
+}
+
+static int indrToPortIndex(volatile uint32_t* indrPort)
+{
+    // returns ((<port> - <offset>) - <ports base>) / <port stride>
+    // <offset> is the offset of INDR withing GPIO_Typedef (as in hardware)
+    // <port base> is the base addres of the first port
+    // <port stride> is the offset between two contiguous port, i.e 1024 bytes, i.e 0x400, i.e a 10 bits shift.
+    return (((size_t)indrPort - offsetof(GPIO_TypeDef, GPIO_TypeDef::INDR)) - GPIOA_BASE) >> 10;
 }
 
 static void gpioRccClockEnable(GPIO_TypeDef* port)
@@ -51,10 +62,11 @@ OneWireError_e OneWire::begin(GPIO_TypeDef* dio_port, const uint8_t dio_pin, GPI
 
     // --- Configure DIO Pin ---
     //_dio_port   = dio_port;
-    _dioPinMask = 1UL << dio_pin;
-    _dioBSR     = &(dio_port->BSHR); // Bis set register (we won't use its 'reset' MSW)
-    _dioBCR     = &(dio_port->BCR); // Bit clear regiser
-    _dioINDR    = &(dio_port->INDR); // Port "data in" register
+    _dioPinIndex = dio_pin;
+    _dioPinMask  = 1UL << dio_pin;
+    _dioBSR      = &(dio_port->BSHR); // Bis set register (we won't use its 'reset' MSW)
+    _dioBCR      = &(dio_port->BCR); // Bit clear regiser
+    _dioINDR     = &(dio_port->INDR); // Port "data in" register
     if (dio_pin < 8) {
         // Which config port to address, and how, depending on the pin's index (each register handle pin [0..7] and [8..15] respectivly).
         _dioCFGR    = &(dio_port->CFGLR);
@@ -72,9 +84,11 @@ OneWireError_e OneWire::begin(GPIO_TypeDef* dio_port, const uint8_t dio_pin, GPI
     gpioRccClockEnable(dio_port); // Enable DIO port clock
     ll_mode_input(); // Set DIO pin to high-impedance input for idle state
 
+
     if (pullup_port != nullptr) {
         // --- Configure Pull-up Power Pin, same tricks as DIO ---
         //_pullup_port = pullup_port;
+        _pupPinIndex = pullup_pin;
         _pupBSR      = &(pullup_port->BSHR); // To set bits
         _pupBCR      = &(pullup_port->BCR); // To clear bits
         _pupPinIndex = pullup_pin;
@@ -87,6 +101,7 @@ OneWireError_e OneWire::begin(GPIO_TypeDef* dio_port, const uint8_t dio_pin, GPI
         *_pupPortCFGR = (pullup_port->CFGLR & _pupCfgMask) | (GPIO_CFGLR_OUT_10Mhz_PP << (pullup_pin * 4));
         power(); // Default to bus being powered off
     } else {
+        _pupPinIndex = -1;
         _pupBSR      = nullptr;
         _pupBCR      = nullptr;
         _pupPinIndex = 0;
@@ -106,6 +121,58 @@ OneWireError_e OneWire::begin(GPIO_TypeDef* dio_port, const uint8_t dio_pin, GPI
     }
     power(false);
     return OneWireError_e::NO_ERROR;
+}
+
+
+void OneWire::enableBus(uint32_t charge_delay_us)
+{
+    if (_pupPortCFGR) {
+        *_pupPortCFGR = (*_pupPortCFGR & _pupCfgMask) | (GPIO_CFGLR_OUT_2Mhz_PP << (_pupPinIndex << 2)); // Make it a slow P-P output.
+        *_pupBSR      = 1U << _pupPinIndex; // Set high indefinitely
+        if (charge_delay_us) {
+            // Let the SWI slaves parasitic-power-supplies charge their capacitors for a time. 500µs isn't canon, but it will do.
+            Delay_Us(charge_delay_us);
+        }
+    }
+}
+
+void OneWire::disableBus()
+{
+    *_pupBCR      = 1U << _pupPinIndex; // Set it low (drains the bus for a couple of clock cycles)
+    *_pupPortCFGR = (*_pupPortCFGR & _pupCfgMask) | (GPIO_CFGLR_IN_FLOAT << (_pupPinIndex << 2)); // Make it an input
+    ll_mode_input();
+}
+
+
+void OneWire::enableChangeDetection()
+{
+
+
+    *_dioCFGR = (*_dioCFGR & _dioCfgMask) | _dioCfgFlt; // make it a floating input.
+    ExtiHandler::setHandler(_dioPinIndex, [this]() { this->onChangeDetected(); });
+    // EXTI->EVENR |= _dioPinMask;
+    // EXTI->FTENR |= _dioPinMask;
+    // EXTI->RTENR |= _dioPinMask;
+    AFIO->EXTICR |= indrToPortIndex(_dioINDR) * _dioPinMask; // links the appropriate port to EXTIn
+}
+
+void OneWire::disableChangeDetection()
+{
+    // Just undo what enableChangeDetection() did by clearing the `EXTI` configs.
+    ExtiHandler::removeHandler([this]() { this->onChangeDetected(); });
+
+    //EXTI->EVENR &= ~_dioPinMask;
+    //EXTI->FTENR &= ~_dioPinMask;
+    //EXTI->RTENR &= ~_dioPinMask;
+    // resetting `AFIO->EXTICR` wouldn't achieve anything.
+}
+
+
+void OneWire::onChangeDetected()
+{
+    uint8_t state = ll_read();
+    _hasChanged   = state ^ _lastState;
+    _lastState    = state;
 }
 
 void OneWire::power(bool enable)
@@ -142,7 +209,7 @@ OneWireError_e OneWire::reset_bus(uint8_t retries)
 
     Delay_Us(OW_Timings_e::OWT_RSTL); // emit the reset pulse
     _overdriven = false; // whichever mode we were in, the bus has now been reset into standard speed.
-    
+
     ll_mode_input(); // and make it high-z again.
     uint32_t timeoutEntryTime = SysTick->CNT;
     do {
@@ -237,7 +304,7 @@ uint8_t OneWire::readBit(void)
         Delay_Us(OWT_READ_MSR); // the slave finally responds (or not)
         r = ll_read(); // and the master samples the bit
         Delay_Us(OWT_READ_PADDING); // the time slot finishes
-    }    
+    }
     return r;
 }
 

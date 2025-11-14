@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "StaticBuffer.hpp"
+#include "SwiMuxDelegateFunc.h"
 
 enum SwiMuxOpcodes_e : uint8_t
 {
@@ -108,46 +109,6 @@ struct RollCallArray_t {
 const uint8_t SwiMuxRequest_GetPresence[2] = { SMCMD_GetPresence, (uint8_t)(0xFF & ~SMCMD_GetPresence) };
 const uint8_t SwiMuxRequest_Sleep[2]       = { SMCMD_Sleep, (uint8_t)(0xFF & ~SMCMD_Sleep) };
 
-template <typename> class SwiMuxDelegateFunc_t;
-
-template <typename Ret, typename... Args> class SwiMuxDelegateFunc_t<Ret(Args...)> {
-    using FnPtr = Ret (*)(void*, Args...);
-
-    void* obj;
-    FnPtr fn;
-
-  public:
-    SwiMuxDelegateFunc_t() : obj(nullptr), fn(nullptr) {}
-
-    // lambdas / functors
-    template <typename T> SwiMuxDelegateFunc_t(const T& lambda)
-    {
-        // We must cast away the const to store it in a void*, but it's safe
-        // because the lambda's call operator is const by default.
-        obj = const_cast<void*>(static_cast<const void*>(&lambda));
-        fn  = [](void* o, Args... args) -> Ret {
-            // Cast back to a const T* to correctly invoke the call operator
-            return (*static_cast<const T*>(o))(args...);
-        };
-    }
-    // raw function pointer
-    SwiMuxDelegateFunc_t(Ret (*func)(Args...))
-    {
-        obj = reinterpret_cast<void*>(func);
-        fn  = [](void* o, Args... args) -> Ret {
-            auto f = reinterpret_cast<Ret (*)(Args...)>(o);
-            return f(args...);
-        };
-    }
-
-
-    // allow = nullptr
-    SwiMuxDelegateFunc_t(nullptr_t) : obj(nullptr), fn(nullptr) {}
-
-    Ret operator()(Args... args) const { return fn(obj, args...); }
-
-    explicit operator bool() const { return fn != nullptr; }
-};
 
 
 

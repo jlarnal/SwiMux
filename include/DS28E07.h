@@ -15,6 +15,11 @@ class DS28E07 {
     }
 
 
+    inline void disableBus() { _ow.disableBus(); }
+    inline void disableChangeDetection() { _ow.disableChangeDetection(); }
+    inline void enableBus() { _ow.enableBus(); }
+    inline void enableChangeDetection() { _ow.enableChangeDetection(); }
+
     /** @brief Returns the laser-etched ROM ID of the sole device on the bus. 
      * @param[out] uid An buffer of at least 8 bytes to receive the result.
      * @returns <false> if the read failed, <true> otherwise.

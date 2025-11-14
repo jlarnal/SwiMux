@@ -205,7 +205,7 @@ static void testSWI(DS28E07 devices[], const OneWire::OneWireConfig_t cfgs[])
 
 
         strncpy((char*)buff, "Not erased!!!!", 16);
-        if (devices[idx].read(0, buff, 11) != 11) {
+        if (devices[idx].read(0, buff, sizeof(buff)) != sizeof(buff)) {
             printf("  • first DS28E07.read FAILED: %s", getErrorName(devices[idx].getLastError()));
             continue;
         }
@@ -266,6 +266,12 @@ static void testSWI(DS28E07 devices[], const OneWire::OneWireConfig_t cfgs[])
         printStr(buff, sizeof(buff), '"');
         printf("\r\n");
 
+        #ifdef FULL_ERASE_AFTER_TEST
+        if(devices[idx].eraseAll(DS28E07::ErasurePassCode)!=DS28E07::MemorySize_Bytes){
+            printf("  • Final full erasure FAILED: %s\r\n", getErrorName(devices[idx].getLastError()));
+            continue;
+        }
+        #endif 
 
         printf("\r\nBus #%d passed all tests.\r\n", idx);
     }

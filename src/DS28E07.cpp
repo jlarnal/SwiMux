@@ -37,6 +37,8 @@ OneWireError_e DS28E07::begin(GPIO_TypeDef* dioPort, int8_t dioPin, GPIO_TypeDef
 }
 
 
+
+
 bool DS28E07::get_self_address()
 {
     _isSelected = false;
@@ -178,14 +180,15 @@ uint16_t DS28E07::write(const uint16_t address, const uint8_t* data, const uint1
         return 0;
     }
 
-    uint16_t remains    = length;
-    uint16_t wrtAddress = address;
-    uint16_t offset     = address & 7; // offset of the 1st byte on 8-bytes boundaries.
+    ScratchPadWCP_Arg_t scpArgs;
+    uint16_t remains = length;
+    uint16_t offset  = address & 7; // offset of the 1st byte on 8-bytes boundaries.
+    scpArgs.address  = address - offset;
+
     // Ensure the device is selected
     if (!assertSelected(multidrop, overdrive))
         return 0;
 
-    ScratchPadWCP_Arg_t scpArgs;
     // Start writing. In case of unaligned address,
     // we'll have to perform a READ-MODIFY-WRITE, overwriting the 8-bytes chunk last bytes.
     if (offset) { // unaligned starting write address ?
@@ -208,20 +211,20 @@ uint16_t DS28E07::write(const uint16_t address, const uint8_t* data, const uint1
             return 0;
         }
         data += bytesInChunk; // advance our source pointer
-        wrtAddress += bytesInChunk;
+        scpArgs.address += 8;
         remains -= bytesInChunk;
     }
 
 
     // Then, as long as there's more than 7 bytes to write
     while (remains > 7) {
-        scpArgs.address = wrtAddress;
-        scpArgs.buffer  = data;
+        scpArgs.buffer = data;
         if (!scratch_wrt_chk_cpy(scpArgs)) {
             return length - remains;
         }
         data += 8; // advance our source pointer
         remains -= 8;
+        scpArgs.address += 8;
     }
 
     // Are there still bytes to write (but not more than 7).
@@ -229,12 +232,11 @@ uint16_t DS28E07::write(const uint16_t address, const uint8_t* data, const uint1
     // but we overwite the starting bytes of the chunk this time.
     if (remains) {
         uint8_t tmp[8];
-        if (read(wrtAddress, tmp, 8, multidrop, overdrive) != 8) {
+        if (read(scpArgs.address, tmp, 8, multidrop, overdrive) != 8) {
             _lastError  = OneWireError_e::ALIGNED_WRITE_TAIL_PREREAD;
             _isSelected = false;
         }
-        memcpy(tmp, data, remains);
-        scpArgs.address = (uint16_t)(address - offset);
+        memcpy(tmp, data, remains);        
         scpArgs.buffer  = tmp;
         if (!scratch_wrt_chk_cpy(scpArgs)) {
             // _lastError has been set by `scratch_wrt_chk_cpy` itself.

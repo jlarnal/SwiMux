@@ -19,18 +19,20 @@ DS28E07 devs[NUMBER_OF_BUSES];
 uint8_t usart_rx_mem[RX_BUFF_SIZE];
 uint8_t usart_tx_mem[TX_BUFF_SIZE];
 
+
+
 SwiMuxComms_t decoder;
 
 
 
 const OneWire::OneWireConfig_t busesConfigs[NUMBER_OF_BUSES] = {
     // clang-format off
-        {GPIOD, 3, nullptr, -1 }, //GPIOA, 1},
-        {GPIOD, 2, nullptr, -1 }, //GPIOA, 2},
-        {GPIOD, 0, nullptr, -1 }, //GPIOC, 1},
-        {GPIOC, 7, nullptr, -1 }, //GPIOC, 2},
-        {GPIOC, 6, nullptr, -1 }, //GPIOC, 3}, 
-        {GPIOC, 5, nullptr, -1 } //GPIOC, 4}
+        {OW_DIOPORT_BUS0, OW_DIOPIN_BUS0, OW_PUPPORT_BUS0, OW_PUPPIN_BUS0 },
+        {OW_DIOPORT_BUS1, OW_DIOPIN_BUS1, OW_PUPPORT_BUS1, OW_PUPPIN_BUS1 },
+        {OW_DIOPORT_BUS2, OW_DIOPIN_BUS2, OW_PUPPORT_BUS2, OW_PUPPIN_BUS2 },
+        {OW_DIOPORT_BUS3, OW_DIOPIN_BUS3, OW_PUPPORT_BUS3, OW_PUPPIN_BUS3 },
+        {OW_DIOPORT_BUS4, OW_DIOPIN_BUS4, OW_PUPPORT_BUS4, OW_PUPPIN_BUS4 },
+        {OW_DIOPORT_BUS5, OW_DIOPIN_BUS5, OW_PUPPORT_BUS5, OW_PUPPIN_BUS5 } 
     }; // clang-format on
 
 #ifdef ADD_CONSOLE_DEBUGGING
@@ -82,7 +84,7 @@ bool waitForUartDebug()
 
 static uint8_t* g_payload;
 static size_t plength;
-static uint32_t lastReception_ms;
+static uint32_t lastReception_ticks;
 
 
 
@@ -157,7 +159,7 @@ int main(void)
     // The following statement made the SwiMux send a presence report on reset.
     //processPresenceReport(); // Disabled until further notice.
 #ifdef AUTOSLEEP_ENABLED
-    lastReception_ms = SysTick->CNT;
+    lastReception_ticks = SysTick->CNT;
 #endif
     while (1) {
 #ifdef ADD_CONSOLE_DEBUGGING
@@ -192,8 +194,8 @@ int main(void)
 
 
         while (uart_available() > 0) {
-            lastReception_ms  = SysTick->CNT;
-            SwiMuxError_e err = decoder.decode(uart_getC(), g_payload, plength);
+            lastReception_ticks = SysTick->CNT;
+            SwiMuxError_e err   = decoder.decode(uart_getC(), g_payload, plength);
             if (err >= SMERR_ERRORS) {
                 sendNack(err);
                 continue;
@@ -231,8 +233,8 @@ int main(void)
             Delay_Us(5);
         }
 #ifdef AUTOSLEEP_ENABLED
-        if ((SysTick->CNT - lastReception_ms) > Ticks_from_Ms(DEFAULT_AUTOSLEEP_DELAY_MS)) {
-            lastReception_ms = SysTick->CNT; // per good practice, even though `processSleep` will reset the mcu once awaken.
+        if ((SysTick->CNT - lastReception_ticks) > Ticks_from_Ms(DEFAULT_AUTOSLEEP_DELAY_MS)) {
+            lastReception_ticks = SysTick->CNT; // per good practice, even though `processSleep` will reset the mcu once awaken.
             processSleep(true);
         }
 #endif
@@ -334,19 +336,20 @@ static void processGetUID()
         return;
     }
     SwiMuxGetUID_t* cmd = (SwiMuxGetUID_t*)g_payload;
-    if (cmd->busIndex > 5) {
+    if (cmd->busIndex >= NUMBER_OF_BUSES) {
         sendNack(SwiMuxError_e::SMERR_BusIndexOutOfRange);
         return;
     }
     SwiMuxRespUID_t uidResp;
-    int retries = 3;
+    uidResp.uid.value = 0ULL;
+    int retries       = 3;
     while (retries--) {
         if (devs[cmd->busIndex].getUid(uidResp.uid.bytes_LE)) {
             if (uidResp.uid.value != UINT64_MAX)
                 break; // good value
         }
     }
-    if (uidResp.uid.value != 0 && uidResp.uid.value != UINT64_MAX) {
+    if (retries > 0 && uidResp.uid.value != 0 && uidResp.uid.value != UINT64_MAX) {
         // Send the Guid response packet
         sendUid(uidResp);
     } else {
@@ -366,18 +369,32 @@ static void processSleep(bool autoSleep)
         sendAck(SMCMD_Sleep);
     }
     for (int idx = 0; idx < NUMBER_OF_BUSES; idx++) {
-        devs[idx].disableBus(); // Cut power if possible
-        devs[idx].disableChangeDetection(); // enableChangeDetection(); //Enable pin change detection on all buses.
+        devs[idx].disableBus(); // Cut power (if originating from the SwiMux).
+        //devs[idx].enableChangeDetection(); //Enable pin change detection on all buses.
     }
     Delay_Us(1000); // wait 1ms (1000µs)
 
     SysTick->CTLR = 0; // Disable system counter.
 
     // An event on the buses or the uart should wake us up.
-    __WFE();
-    ch32mcuReset();
+    __WFE(); // sleep.
+
+#if defined(FUNCONF_SYSTICK_USE_HCLK) && FUNCONF_SYSTICK_USE_HCLK
+    // Reenable Systick counter
+    SysTick->CTLR = 5;
+#else
+    // Reenable Systick counter
+    SysTick->CTLR = 1;
+#endif
+    // Reenable the buses.
+    for (int idx = 0; idx < NUMBER_OF_BUSES; idx++) {
+        devs[idx].enableBus();
+        //devs[idx].disableChangeDetection();
+    }
 #endif
 }
+
+
 
 static void processPresenceReport()
 {

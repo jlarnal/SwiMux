@@ -243,6 +243,12 @@ class OneWire {
     OneWireError_e begin(GPIO_TypeDef* dio_port, const uint8_t dio_pin, GPIO_TypeDef* pullup_port, int8_t pullup_pin);
     inline OneWireError_e begin(const OneWireConfig_t& config) { return begin(config.dioPort, config.dioPin, config.pullupPort, config.pullupPin); }
 
+
+    void enableBus(uint32_t charge_delay_us = 500);
+    void disableBus();
+    void enableChangeDetection();
+    void disableChangeDetection();
+
     /** @brief Perform a 1-Wire reset cycle. Returns 1 if a device responds
     * with a presence pulse.  Returns 0 if there is no device or the
     * bus is shorted or otherwise held low for more than 250uS. */
@@ -349,6 +355,14 @@ class OneWire {
     */
     uint16_t crc16(const uint8_t* input, uint16_t len, uint16_t crc);
 
+
+    inline bool hasChanged()
+    {
+        bool state  = _hasChanged ? true : false;
+        _hasChanged = 0;
+        return state;
+    }
+
   private:
     // One-Wire timings, in microseconds (1e-6s)
     enum OW_Timings_e : uint32_t
@@ -385,11 +399,12 @@ class OneWire {
     uint8_t _romId[8], _lastDiscrepancy, _lastFamilyDiscrepancy;
     volatile uint32_t _dioPinMask = 0, *_dioBSR = nullptr, *_dioBCR = nullptr, *_dioINDR = nullptr, *_dioCFGR = nullptr, _dioCfgOD = 0,
                       _dioCfgPUD = 0, _dioCfgFlt = 0, _dioCfgMask = 0;
-    volatile uint32_t *_pupBSR = nullptr, *_pupBCR = nullptr, _pupPinIndex = 0, _pupCfgMask = 0, *_pupPortCFGR = nullptr;
-    bool _lastDeviceFlag, _overdriven = false;
+    volatile uint32_t *_pupBSR = nullptr, *_pupBCR = nullptr, _pupCfgMask = 0, *_pupPortCFGR = nullptr;
+    volatile int8_t _dioPinIndex = -1, _pupPinIndex = -1;
+    bool _lastDeviceFlag, _overdriven               = false;
+    uint8_t _lastState, _hasChanged;
 
-
-
+    void onChangeDetected();
     // Write a bit. The bus is always left powered at the end, see
     // note in write() about that.
     void writeBit(uint8_t v);
@@ -399,13 +414,22 @@ class OneWire {
 
 
 
-    inline __attribute__((always_inline)) uint8_t ll_read() { return (*_dioINDR & _dioPinMask) == _dioPinMask; }
+    inline __attribute__((always_inline)) uint8_t ll_read() { return (*_dioINDR & _dioPinMask) == _dioPinMask ? 1 : 0; }
 
+    // Sets DIO to weak pull-up input mode.
     inline __attribute__((always_inline)) void ll_mode_input()
     {
         *_dioCFGR = (*_dioCFGR & _dioCfgMask) | _dioCfgPUD;
-        *_dioBCR  = _dioPinMask;
+#ifdef OW_DIO_INPUT_PULLSDOWN
+        *_dioBCR = _dioPinMask;
+#else
+        *_dioBSR = _dioPinMask;
+#endif
     }
+
+    inline __attribute__((always_inline)) void ll_mode_float() { *_dioCFGR = (*_dioCFGR & _dioCfgMask) | _dioCfgFlt; }
+
+
 
     inline __attribute__((always_inline)) void ll_mode_output() { *_dioCFGR = (*_dioCFGR & _dioCfgMask) | _dioCfgOD; }
 
