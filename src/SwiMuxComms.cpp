@@ -59,6 +59,9 @@ bool SwiMuxComms_t::waitForAckTo(const SwiMuxOpcodes_e opCode, SwiMuxDelegateFun
 {
     uint32_t timeout_ms = 0;
     switch (opCode) {
+        case SwiMuxOpcodes_e::SMCMD_Wakeup:
+            timeout_ms = 2;
+            break;
         case SwiMuxOpcodes_e::SMCMD_GetPresence:
             [[fallthrough]];
         case SwiMuxOpcodes_e::SMCMD_Sleep:
@@ -79,9 +82,9 @@ bool SwiMuxComms_t::waitForAckTo(const SwiMuxOpcodes_e opCode, SwiMuxDelegateFun
         if (val > -1) {
             SwiMuxError_e res = decode((uint8_t)val, payload, pLen);
             if (res == SMERR_Done) {
-                if (pLen && payload != nullptr) { // frame ?
+                if (pLen != 0 && payload != nullptr) { // frame ?
                     // We had our response frame, let's check its contents.
-                    if (pLen >= 3 && payload[0] == (uint8_t)SwiMuxOpcodes_e::SMCMD_Ack && payload[1] == ((uint8_t)0xFF & ~SMCMD_Ack)
+                    if (pLen >= 3 && payload[0] == (uint8_t)SwiMuxOpcodes_e::SMCMD_Ack && payload[1] == ((uint8_t)0xFF ^ SMCMD_Ack)
                       && payload[2] == (uint8_t)opCode) {
                         return true; // opCode was acknowledged ! Yay
                     } else {

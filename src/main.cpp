@@ -131,7 +131,7 @@ void setup()
 #endif
 }
 
-static void processRead(), processWrite(), processGetUID(), processRollCall(), processSleep(bool autoSleep = false), processPresenceReport();
+static void processWakeup(), processRead(), processWrite(), processGetUID(), processRollCall(), processSleep(bool autoSleep = false), processPresenceReport();
 static void sendAck(SwiMuxOpcodes_e opcode);
 static void sendNack(SwiMuxError_e error);
 static void sendAckArgs(SwiMuxOpcodes_e opcode, uint8_t arg);
@@ -194,7 +194,6 @@ int main(void)
 
 
         while (uart_available() > 0) {
-            lastReception_ticks = SysTick->CNT;
             SwiMuxError_e err   = decoder.decode(uart_getC(), g_payload, plength);
             if (err >= SMERR_ERRORS) {
                 sendNack(err);
@@ -208,6 +207,9 @@ int main(void)
             // Now to intepret the command
             __NOP();
             switch (g_payload[0]) {
+                case SMCMD_Wakeup:
+                    processWakeup();
+                    break;                
                 case SMCMD_ReadBytes:
                     processRead();
                     break;
@@ -231,6 +233,7 @@ int main(void)
                     break;
             }
             Delay_Us(5);
+            lastReception_ticks = SysTick->CNT;            
         }
 #ifdef AUTOSLEEP_ENABLED
         if ((SysTick->CNT - lastReception_ticks) > Ticks_from_Ms(DEFAULT_AUTOSLEEP_DELAY_MS)) {
@@ -239,6 +242,10 @@ int main(void)
         }
 #endif
     }
+}
+
+static void processWakeup(){
+    sendAck(SMCMD_Wakeup);
 }
 
 static void processRead()

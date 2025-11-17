@@ -22,6 +22,7 @@ enum SwiMuxOpcodes_e : uint8_t
     SMCMD_HaveUID,
     SMCMD_Sleep,
     SMCMD_Autosleep,
+    SMCMD_Wakeup,
     SMCMD_Ack,
     SMCMD_Nack,
 };

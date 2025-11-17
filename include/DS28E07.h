@@ -78,8 +78,8 @@ class DS28E07 {
     static constexpr uint16_t CRC16_INITIAL_VALUE  = 0;
 
     OneWire _ow;
-    uint8_t _devAddress[8]    = { 0, 0, 0, 0, 0, 0, 0, 0 };
-    OneWireError_e _lastError = OneWireError_e::NO_ERROR;
+    uint8_t _devAddress[8] __aligned(8) = { 0, 0, 0, 0, 0, 0, 0, 0 };
+    OneWireError_e _lastError           = OneWireError_e::NO_ERROR;
     bool _hasAddress = false, _isSelected = false;
 
 

@@ -420,10 +420,10 @@ class OneWire {
     inline __attribute__((always_inline)) void ll_mode_input()
     {
         *_dioCFGR = (*_dioCFGR & _dioCfgMask) | _dioCfgPUD;
-#ifdef OW_DIO_INPUT_PULLSDOWN
-        *_dioBCR = _dioPinMask;
-#else
+#ifdef OW_DIO_INPUT_PULLSUP
         *_dioBSR = _dioPinMask;
+#else
+        *_dioBCR = _dioPinMask;
 #endif
     }
 

@@ -38,7 +38,6 @@ OneWireError_e DS28E07::begin(GPIO_TypeDef* dioPort, int8_t dioPin, GPIO_TypeDef
 
 
 
-
 bool DS28E07::get_self_address()
 {
     _isSelected = false;
@@ -53,7 +52,7 @@ bool DS28E07::get_self_address()
         _hasAddress = false;
         memset(_devAddress, 0, 8);
     } else {
-        _hasAddress = true;
+        _hasAddress = *((uint64_t*)&_devAddress[0]) != 0ULL && *((uint64_t*)&_devAddress[0]) != UINT64_MAX;
     }
     return _hasAddress;
 }
@@ -236,8 +235,8 @@ uint16_t DS28E07::write(const uint16_t address, const uint8_t* data, const uint1
             _lastError  = OneWireError_e::ALIGNED_WRITE_TAIL_PREREAD;
             _isSelected = false;
         }
-        memcpy(tmp, data, remains);        
-        scpArgs.buffer  = tmp;
+        memcpy(tmp, data, remains);
+        scpArgs.buffer = tmp;
         if (!scratch_wrt_chk_cpy(scpArgs)) {
             // _lastError has been set by `scratch_wrt_chk_cpy` itself.
             return length - remains;
