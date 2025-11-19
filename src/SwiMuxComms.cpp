@@ -53,15 +53,13 @@ void SwiMuxComms_t::sendUid(SwiMuxRespUID_t& uidResp, SwiMuxDelegateFunc_t<void(
     encode((uint8_t*)&uidResp, sizeof(SwiMuxRespUID_t), writer);
 }
 
-
 bool SwiMuxComms_t::waitForAckTo(const SwiMuxOpcodes_e opCode, SwiMuxDelegateFunc_t<unsigned long()> getTime_ms,
   SwiMuxDelegateFunc_t<int(void)> readFunc, SwiMuxDelegateFunc_t<void(unsigned long)> delay_ms_func)
 {
     uint32_t timeout_ms = 0;
     switch (opCode) {
         case SwiMuxOpcodes_e::SMCMD_Wakeup:
-            timeout_ms = 2;
-            break;
+            [[fallthrough]];
         case SwiMuxOpcodes_e::SMCMD_GetPresence:
             [[fallthrough]];
         case SwiMuxOpcodes_e::SMCMD_Sleep:
@@ -80,25 +78,81 @@ bool SwiMuxComms_t::waitForAckTo(const SwiMuxOpcodes_e opCode, SwiMuxDelegateFun
     do {
         val = readFunc();
         if (val > -1) {
+            // A byte was received, process it
             SwiMuxError_e res = decode((uint8_t)val, payload, pLen);
+
             if (res == SMERR_Done) {
-                if (pLen != 0 && payload != nullptr) { // frame ?
-                    // We had our response frame, let's check its contents.
-                    if (pLen >= 3 && payload[0] == (uint8_t)SwiMuxOpcodes_e::SMCMD_Ack && payload[1] == ((uint8_t)0xFF ^ SMCMD_Ack)
+                // A complete frame was decoded
+                if (pLen != 0 && payload != nullptr) {
+                    // Check if it's the ACK we are looking for
+                    if (pLen >= 3 && payload[0] == (uint8_t)SwiMuxOpcodes_e::SMCMD_Ack && payload[1] == ((uint8_t)0xFF ^ payload[0])
                       && payload[2] == (uint8_t)opCode) {
-                        return true; // opCode was acknowledged ! Yay
-                    } else {
-                        return false; // error in the frame.
+                        return true; // Success!
                     }
+                    // --- FIX 1 ---
+                    // It was a valid frame, but not the one we want (e.g., a NACK).
+                    // We do nothing and let the loop continue to wait for the correct frame.
+                    // The decode() function will reset itself on the next byte.
                 }
             }
-            // Have some time to receive other bytes.
+        } else {
+            // --- FIX 2 ---
+            // No byte was available, so call the delay if it exists.
+            // This prevents a tight-loop from hogging the CPU.
             if (delay_ms_func)
                 delay_ms_func(1);
         }
     } while ((getTime_ms() - startTime) <= timeout_ms);
+
+    // If we exit the loop, it means we timed out.
     return false;
 }
+
+//bool SwiMuxComms_t::waitForAckTo(const SwiMuxOpcodes_e opCode, SwiMuxDelegateFunc_t<unsigned long()> getTime_ms,
+//  SwiMuxDelegateFunc_t<int(void)> readFunc, SwiMuxDelegateFunc_t<void(unsigned long)> delay_ms_func)
+//{
+//    uint32_t timeout_ms = 0;
+//    switch (opCode) {
+//        case SwiMuxOpcodes_e::SMCMD_Wakeup:
+//            timeout_ms = 2;
+//            break;
+//        case SwiMuxOpcodes_e::SMCMD_GetPresence:
+//            [[fallthrough]];
+//        case SwiMuxOpcodes_e::SMCMD_Sleep:
+//            timeout_ms = 10;
+//            break;
+//        default:
+//            timeout_ms = 100;
+//            break;
+//    }
+//
+//    uint32_t startTime = getTime_ms();
+//    uint8_t* payload   = nullptr;
+//    size_t pLen        = 0;
+//    int val;
+//
+//    do {
+//        val = readFunc();
+//        if (val > -1) {
+//            SwiMuxError_e res = decode((uint8_t)val, payload, pLen);
+//            if (res == SMERR_Done) {
+//                if (pLen != 0 && payload != nullptr) { // frame ?
+//                    // We had our response frame, let's check its contents.
+//                    if (pLen >= 3 && payload[0] == (uint8_t)SwiMuxOpcodes_e::SMCMD_Ack && payload[1] == ((uint8_t)0xFF ^ SMCMD_Ack)
+//                      && payload[2] == (uint8_t)opCode) {
+//                        return true; // opCode was acknowledged ! Yay
+//                    } else {
+//                        return false; // error in the frame.
+//                    }
+//                }
+//            }
+//            // Have some time to receive other bytes.
+//            if (delay_ms_func)
+//                delay_ms_func(1);
+//        }
+//    } while ((getTime_ms() - startTime) <= timeout_ms);
+//    return false;
+//}
 
 void SwiMuxComms_t::reset()
 {

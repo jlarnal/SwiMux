@@ -47,6 +47,7 @@ enum SwiMuxError_e : uint8_t
     SMERR_GuidUnreadable,
     SMERR_BadCrc,
     SMERR_BADFUNCALL, // critial software error
+    SMERR_CommandDisabled,
 };
 
 union __attribute__((packed)) UidType_t {        
@@ -147,7 +148,7 @@ class SwiMuxComms_t {
     static constexpr uint8_t END     = 0xC0;
     static constexpr uint8_t ESC_END = 0xDC;
 
-    static constexpr size_t SWIMUX_BUFF_SIZE = 140;
+    static constexpr size_t SWIMUX_BUFF_SIZE = 150;
     StaticBuffer_t<SWIMUX_BUFF_SIZE> _buffer;
     uint32_t _calculated_crc, _crc_consumed;
 #ifdef SWIMUX_USES_COBS

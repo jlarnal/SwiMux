@@ -131,7 +131,8 @@ void setup()
 #endif
 }
 
-static void processWakeup(), processRead(), processWrite(), processGetUID(), processRollCall(), processSleep(bool autoSleep = false), processPresenceReport();
+static void processWakeup(), processRead(), processWrite(), processGetUID(), processRollCall(), processSleep(bool autoSleep = false),
+  processPresenceReport();
 static void sendAck(SwiMuxOpcodes_e opcode);
 static void sendNack(SwiMuxError_e error);
 static void sendAckArgs(SwiMuxOpcodes_e opcode, uint8_t arg);
@@ -162,18 +163,7 @@ int main(void)
     lastReception_ticks = SysTick->CNT;
 #endif
     while (1) {
-#ifdef ADD_CONSOLE_DEBUGGING
-        if ((SysTick->CNT - lastTick) > Ticks_from_Ms(1000)) {
-            lastTick = SysTick->CNT;
-            uart_write(".", 1);
-        }
-        if ((SysTick->CNT - ticksOnStart) > Ticks_from_Ms(5000)) {
-            ticksOnStart = SysTick->CNT;
-            uart_write("ZzZzzz\r\n", 8);
-            Delay_Ms(20); // Let the uart send its last char.
-            processSleep();
-        }
-#endif
+
 
         //#define LOREM_IPSUM                                                                                                                                  \
 //    "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim "  \
@@ -194,7 +184,7 @@ int main(void)
 
 
         while (uart_available() > 0) {
-            SwiMuxError_e err   = decoder.decode(uart_getC(), g_payload, plength);
+            SwiMuxError_e err = decoder.decode(uart_getC(), g_payload, plength);
             if (err >= SMERR_ERRORS) {
                 sendNack(err);
                 continue;
@@ -209,7 +199,7 @@ int main(void)
             switch (g_payload[0]) {
                 case SMCMD_Wakeup:
                     processWakeup();
-                    break;                
+                    break;
                 case SMCMD_ReadBytes:
                     processRead();
                     break;
@@ -233,7 +223,7 @@ int main(void)
                     break;
             }
             Delay_Us(5);
-            lastReception_ticks = SysTick->CNT;            
+            lastReception_ticks = SysTick->CNT;
         }
 #ifdef AUTOSLEEP_ENABLED
         if ((SysTick->CNT - lastReception_ticks) > Ticks_from_Ms(DEFAULT_AUTOSLEEP_DELAY_MS)) {
@@ -244,7 +234,8 @@ int main(void)
     }
 }
 
-static void processWakeup(){
+static void processWakeup()
+{
     sendAck(SMCMD_Wakeup);
 }
 
@@ -274,7 +265,7 @@ static void processRead()
 
     if (devs[pCmd->busIndex].read(pCmd->offset, &usart_tx_mem[sizeof(SwiMuxCmdRead_t)], pCmd->length) == pCmd->length) {
         // Device read successful.
-        if (decoder.encode(usart_tx_mem, pCmd->length, uart_writeByte) == false) {
+        if (decoder.encode(usart_tx_mem, pCmd->length + sizeof(SwiMuxCmdRead_t), uart_writeByte) == false) {
             sendNack(SMERR_ResponseEncodingFailed); // failed to read
         } // otherwise the `encode` success is producing the ACK itself on the serial line.
     } else {
@@ -368,11 +359,14 @@ static void processGetUID()
 
 static void processSleep(bool autoSleep)
 {
-    sendAck(SMCMD_Sleep);
-#ifdef AUTOSLEEP_ENABLED
-    if (autoSleep) {
-        sendAck(SMCMD_Autosleep);
-    } else {
+
+#ifndef AUTOSLEEP_ENABLED
+    if (!autoSleep) {
+        sendNack(SwiMuxError_e::SMERR_CommandDisabled);
+        
+    }
+#else
+    if (!autoSleep) {
         sendAck(SMCMD_Sleep);
     }
     for (int idx = 0; idx < NUMBER_OF_BUSES; idx++) {

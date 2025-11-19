@@ -13,6 +13,58 @@ extern uint8_t usart_tx_mem[TX_BUFF_SIZE];
 extern SwiMuxComms_t decoder;
 extern void ch32mcuReset();
 
+#define CARET_BLINK_TICK_PERIOD (Ticks_from_Ms(500))
+
+static bool blinkCaret(bool reset = false, bool resetState = true)
+{
+    static bool writeCaret  = true;
+    uint32_t lastChangeTick = 0;
+    if (reset) {
+        writeCaret = resetState;
+    }
+
+    if (!reset && ((SysTick->CNT - lastChangeTick) >= CARET_BLINK_TICK_PERIOD)) {
+        return false;
+    }
+    lastChangeTick = SysTick->CNT;
+    if (writeCaret) {
+        uart_putC('_');
+        return true;
+    } else {
+        uart_putC('\b');
+        uart_putC(' ');
+        return false;
+    }
+    writeCaret = !writeCaret;
+}
+
+
+int readSerialInt(const char* optionalChars = nullptr)
+{
+    bool wroteCaret = blinkCaret(true);
+    int value       = 0;
+    do {
+        int charVal = uart_getC();
+        if (charVal >= '0' && charVal <= '9') {
+            value *= 10;
+            value += charVal - '0';
+            wroteCaret = blinkCaret(true, wroteCaret);
+            uart_putC((char)charVal);
+
+        } else if (charVal == '\b') {
+            value /= 10;
+            wroteCaret = blinkCaret(true, wroteCaret);
+            printf("\b \b");
+        } else if (charVal == 13) {
+            return value;
+
+        } else if (value == 0 && optionalChars && strchr(optionalChars, charVal) != nullptr) {
+            return charVal;
+        } else {
+            wroteCaret = blinkCaret();
+        }
+    } while (1);
+}
 
 extern "C" {
 int _write(int fd, const char* buf, int size)
@@ -255,6 +307,21 @@ static void testSWI(DS28E07 devices[], const OneWire::OneWireConfig_t cfgs[])
         Delay_Ms(MS_BETWEEN_TESTS);
 
         memset(buff, 0, sizeof(buff));
+        printf("  • buffer clear ");
+        {
+            bool clearedAll = true; // default
+            for (int idx = 0; idx < sizeof(buff); idx++) {
+                if (buff[idx] != 0) {
+                    clearedAll = false;
+                    break;
+                }
+            }
+            if (!clearedAll) {
+                printf("FAILED !!\r\n");
+                continue;
+            }
+            printf("for next read operation\r\n");
+        }
 
 
         if (devices[idx].read(0, buff, sizeof(buff)) != sizeof(buff)) {
@@ -266,12 +333,12 @@ static void testSWI(DS28E07 devices[], const OneWire::OneWireConfig_t cfgs[])
         printStr(buff, sizeof(buff), '"');
         printf("\r\n");
 
-        #ifdef FULL_ERASE_AFTER_TEST
-        if(devices[idx].eraseAll(DS28E07::ErasurePassCode)!=DS28E07::MemorySize_Bytes){
+#ifdef FULL_ERASE_AFTER_TEST
+        if (devices[idx].eraseAll(DS28E07::ErasurePassCode) != DS28E07::MemorySize_Bytes) {
             printf("  • Final full erasure FAILED: %s\r\n", getErrorName(devices[idx].getLastError()));
             continue;
         }
-        #endif 
+#endif
 
         printf("\r\nBus #%d passed all tests.\r\n", idx);
     }
@@ -294,22 +361,126 @@ size_t makeBuffer(uint8_t* buffer, size_t len, bool overwrite)
     return 0;
 }
 
-void testSwiLines(DS28E07 devices[])
-{
-    //for (int idx = 0; idx < NUMBER_OF_BUSES; idx++) {
-    //    printf("\r\n\n Pulsing bus #%d...", idx);
-    //    devices[idx].pulseBus(20,50,100);
-    //    printf("done\r\n");
-    //}
 
-    printf("This test has been removed from the set.");
+
+static void readTest(DS28E07 devices[])
+{
+    printf("\r\nWhich bus to read ? Enter a value from [0:%d]", NUMBER_OF_BUSES);
+    printf(" or 'A' for all present devices:\r\n>");
+    int selection = readSerialInt("aA");
+    if (selection == 'A' || selection == 'a') { // We need the comparision to 'a' (lowercase) so we don't fall into the next `if` statement.
+        selection = 'A';
+    } else if (selection < 0 || selection >= NUMBER_OF_BUSES) {
+        printf("\r\nWrong entry.");
+        return;
+    }
+    uint8_t buffer[8];
+    if (selection == 'A') {
+        printf("\r\nReading all devices:");
+        for (int idx = 0; idx < NUMBER_OF_BUSES; idx++) {
+            printf("\r\nDevice on bus #%d: ", idx);
+            if (!devices[idx].reset()) { // no device present ?
+                printf(" none\r\n");
+                continue; // skip reading it.
+            }
+
+            for (uint16_t address = 0; address < 128; address += 8) {
+                memset(buffer, 0, 8);
+                if (devices[idx].read(address, buffer, 8) != 8) {
+                    printf("Failed to read device #%d @ 0x%04x", idx, address);
+                }
+                printf("\r\n  ");
+                printbuff(buffer, 8);
+                Delay_Ms(10);
+            }
+        }
+    } else {
+        printf("\r\nDevice on bus #%d: ", selection);
+        if (!devices[selection].reset()) { // no device present ?
+            printf(" none\r\n");
+            return; // skip reading it.
+        }
+
+        for (uint16_t address = 0; address < 128; address += 8) {
+            memset(buffer, 0, 8);
+            if (devices[selection].read(address, buffer, 8) != 8) {
+                printf("Failed to read device #%d @ 0x%04x", selection, address);
+            }
+            printf("\r\n  ");
+            printbuff(buffer, 8);
+            Delay_Ms(10);
+        }
+    }
+    printf("\r\n");
 }
 
+
+static void overwriteTest(DS28E07 devices[]) {}
 
 void doTests(DS28E07 devices[], const OneWire::OneWireConfig_t configs[])
 {
     //testSwiLines(devices);
-    testSWI(devices, configs);
+    bool quit = false;
+    printf("Initialized device(s): ");
+    {
+        int successes = 0;
+        for (int idx = 0; idx < NUMBER_OF_BUSES; idx++) {
+            if (devices[idx].begin(configs[idx]) == OneWireError_e::NO_ERROR) {
+                printf("%d, ", idx);
+                successes++;
+                Delay_Ms(10);
+            }
+        }
+        switch (successes) {
+            case 0:
+                printf(" none detected.\r\n");
+                break;
+            case NUMBER_OF_BUSES:
+                printf(" i.e all %d buses.\r\n", NUMBER_OF_BUSES);
+                break;
+            default:
+                printf(" all other buses silent.");
+                break;
+        }
+    }
+
+
+    printf("\r\nSwiMux internal tests:\r\n");
+    printf(" 0) Read memory\r\n");
+    printf(" 1) Overwrite memory\r\n");
+    printf(" f) Full tests sequence.\r\n");
+    printf(" q) Quit this menu\r\n");
+    printf("Enter your choice:");
+    do {
+        int charVal = uart_getC();
+        switch (charVal) {
+            case '0':
+                uart_print("0\r\n");
+                readTest(devices);
+                quit = true;
+                break;
+            case '1':
+                uart_print("1\r\n");
+                overwriteTest(devices);
+                quit = true;
+                break;
+            case 'f':
+            case 'F':
+                uart_print("f\r\n");
+                testSWI(devices, configs);
+                quit = true;
+                break;
+            case 'q':
+            case 'Q':
+                quit = true;
+                break;
+            default:
+                break;
+        }
+    } while (!quit);
+
+
+
     testEndPrompt();
 }
 

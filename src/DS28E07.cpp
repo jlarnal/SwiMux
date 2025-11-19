@@ -26,12 +26,16 @@ OneWireError_e DS28E07::begin(GPIO_TypeDef* dioPort, int8_t dioPin, GPIO_TypeDef
     OneWireError_e res = _ow.begin(dioPort, dioPin, pullupPort, pullupPin);
     if (res == OneWireError_e::NO_ERROR) {
         if (get_self_address() == false) {
+#ifdef INCLUDE_ONEWIRE_DEBUG
             dbgpf("DS28E07.get_self_address() FAILED with code #0x%X\r\n", _lastError);
+#endif
             return _lastError;
         }
     } else {
         _lastError = res;
+#ifdef INCLUDE_ONEWIRE_DEBUG
         dbgpf("Error #0x%X on OneWire.begin().\r\n", res);
+#endif
     }
     return _lastError;
 }

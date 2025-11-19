@@ -56,8 +56,8 @@
 
 //#define OW_DIO_INPUT_PULLSUP /* weakly pulls the line up - not recommended yet */
 
-#define AUTOSLEEP_ENABLED
-//#define ADD_CONSOLE_DEBUGGING
+//#define AUTOSLEEP_ENABLED
+#define ADD_CONSOLE_DEBUGGING
 #ifdef ADD_CONSOLE_DEBUGGING
 #define DO_ERASURE_TEST
 #define FULL_ERASE_AFTER_TEST
@@ -66,9 +66,12 @@
 #ifdef ADD_CONSOLE_DEBUGGING
 #define dbgp(fmt)       printf(fmt)
 #define dbgpf(fmt, ...) printf(fmt, __VA_ARGS__)
+//#define INCLUDE_ONEWIRE_DEBUG /* You may disable this define */
 #else
 #define dbgpf(fmt, ...)
 #define dbgp(fmt)
 #endif
+
+
 
 #endif
