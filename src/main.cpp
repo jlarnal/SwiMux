@@ -164,25 +164,6 @@ int main(void)
 #endif
     while (1) {
 
-
-        //#define LOREM_IPSUM                                                                                                                                  \
-//    "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim "  \
-//    "veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in "          \
-//    "voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia "        \
-//    "deserunt mollit anim id est laborum."
-        //        const char* LoremIpsum = LOREM_IPSUM;
-        //
-        //        do {
-        //            for (int idx = 0; idx < sizeof(LOREM_IPSUM); idx++) {
-        //                uart_writeByte(static_cast<uint8_t>(LoremIpsum[idx]));
-        //            }
-        //            uart_writeByte('\r');
-        //            uart_writeByte('\n');
-        //            uart_writeByte('\n');
-        //            Delay_Ms(500);
-        //        } while (1);
-
-
         while (uart_available() > 0) {
             SwiMuxError_e err = decoder.decode(uart_getC(), g_payload, plength);
             if (err >= SMERR_ERRORS) {

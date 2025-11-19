@@ -56,11 +56,11 @@
 
 //#define OW_DIO_INPUT_PULLSUP /* weakly pulls the line up - not recommended yet */
 
-//#define AUTOSLEEP_ENABLED
-#define ADD_CONSOLE_DEBUGGING
+#define AUTOSLEEP_ENABLED
+//#define ADD_CONSOLE_DEBUGGING
 #ifdef ADD_CONSOLE_DEBUGGING
 #define DO_ERASURE_TEST
-#define FULL_ERASE_AFTER_TEST
+//#define FULL_ERASE_AFTER_TEST
 #endif
 
 #ifdef ADD_CONSOLE_DEBUGGING

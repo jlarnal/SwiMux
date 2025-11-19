@@ -152,7 +152,7 @@ void testEndPrompt()
                     [[fallthrough]];
                 case 'Y':
                     uart_putC('y');
-                    uart_putC('\n');
+                    uart_putC('\r\n');
                     Delay_Ms(100);
                     handle_reset();
                     break; // put by convention only: any code after the previous statement won't be executed since the device has already reset.
@@ -335,9 +335,12 @@ static void testSWI(DS28E07 devices[], const OneWire::OneWireConfig_t cfgs[])
 
 #ifdef FULL_ERASE_AFTER_TEST
         if (devices[idx].eraseAll(DS28E07::ErasurePassCode) != DS28E07::MemorySize_Bytes) {
-            printf("  • Final full erasure FAILED: %s\r\n", getErrorName(devices[idx].getLastError()));
+            printf("FAILED: %s\r\n", getErrorName(devices[idx].getLastError()));
             continue;
         }
+        printf("done.\r\n");
+#else
+        printf("  • final full skipped (disabled in build).");
 #endif
 
         printf("\r\nBus #%d passed all tests.\r\n", idx);
