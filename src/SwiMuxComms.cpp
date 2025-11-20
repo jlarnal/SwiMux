@@ -54,20 +54,25 @@ void SwiMuxComms_t::sendUid(SwiMuxRespUID_t& uidResp, SwiMuxDelegateFunc_t<void(
 }
 
 bool SwiMuxComms_t::waitForAckTo(const SwiMuxOpcodes_e opCode, SwiMuxDelegateFunc_t<unsigned long()> getTime_ms,
-  SwiMuxDelegateFunc_t<int(void)> readFunc, SwiMuxDelegateFunc_t<void(unsigned long)> delay_ms_func)
+  SwiMuxDelegateFunc_t<int(void)> readFunc, SwiMuxDelegateFunc_t<void(unsigned long)> delay_ms_func, uint32_t timeout_ms)
 {
-    uint32_t timeout_ms = 0;
-    switch (opCode) {
-        case SwiMuxOpcodes_e::SMCMD_Wakeup:
-            [[fallthrough]];
-        case SwiMuxOpcodes_e::SMCMD_GetPresence:
-            [[fallthrough]];
-        case SwiMuxOpcodes_e::SMCMD_Sleep:
-            timeout_ms = 10;
-            break;
-        default:
-            timeout_ms = 100;
-            break;
+    uint32_t used_timeout_ms = timeout_ms;
+    if (used_timeout_ms == 0) {
+        switch (opCode) {
+            case SwiMuxOpcodes_e::SMCMD_Wakeup:
+                [[fallthrough]];
+            case SwiMuxOpcodes_e::SMCMD_GetPresence:
+                [[fallthrough]];
+            case SwiMuxOpcodes_e::SMCMD_Sleep:
+                used_timeout_ms = 10;
+                break;
+            case SwiMuxOpcodes_e::SMCMD_WriteBytes:
+                used_timeout_ms = 128 * 15 + 20; // max duration for a 128 bytes memory, and some more.
+                break;
+            default:
+                used_timeout_ms = 100;
+                break;
+        }
     }
 
     uint32_t startTime = getTime_ms();
@@ -85,9 +90,11 @@ bool SwiMuxComms_t::waitForAckTo(const SwiMuxOpcodes_e opCode, SwiMuxDelegateFun
                 // A complete frame was decoded
                 if (pLen != 0 && payload != nullptr) {
                     // Check if it's the ACK we are looking for
-                    if (pLen >= 3 && payload[0] == (uint8_t)SwiMuxOpcodes_e::SMCMD_Ack && payload[1] == ((uint8_t)0xFF ^ payload[0])
-                      && payload[2] == (uint8_t)opCode) {
-                        return true; // Success!
+                    if (pLen >= 3) {
+                        if (payload[0] == (uint8_t)SwiMuxOpcodes_e::SMCMD_Ack && payload[1] == ((uint8_t)0xFF ^ payload[0])
+                          && payload[2] == (uint8_t)opCode) {
+                            return true; // Success!
+                        }
                     }
                     // --- FIX 1 ---
                     // It was a valid frame, but not the one we want (e.g., a NACK).
@@ -102,7 +109,7 @@ bool SwiMuxComms_t::waitForAckTo(const SwiMuxOpcodes_e opCode, SwiMuxDelegateFun
             if (delay_ms_func)
                 delay_ms_func(1);
         }
-    } while ((getTime_ms() - startTime) <= timeout_ms);
+    } while ((getTime_ms() - startTime) <= used_timeout_ms);
 
     // If we exit the loop, it means we timed out.
     return false;

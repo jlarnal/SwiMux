@@ -32,6 +32,31 @@ enum SwiMuxError_e : uint8_t
     SMERR_Ok            = 0,
     SMERR_InProgress    = SMERR_Ok,
     SMERR_Done          = 1,
+    SMERR_OW_DIO_PORT_NULL = 0x80,
+    SMERR_OW_DIO_PORT_INVALID,
+    SMERR_OW_DIO_PIN_INVALID,
+    SMERR_OW_PULLUP_PORT_INVALID,
+    SMERR_OW_PULLUP_PIN_INVALID,
+    SMERR_OW_NULL_INPUT_BUFFER,
+    SMERR_OW_NULL_OUTPUT_BUFFER,
+    SMERR_OW_NO_BUS_POWER,
+    SMERR_OW_BUS_HELD_LOW,
+    SMERR_OW_NO_DEVICE_PRESENT,
+    SMERR_OW_READ_ROM_FAILED,
+    SMERR_OW_ALIGNED_WRITE_HEAD_PREREAD,
+    SMERR_OW_ALIGNED_WRITE_TAIL_PREREAD,
+    SMERR_OW_MEMADDRESS_OUT_OF_BOUNDS, // Specified address is out of memory bounds.
+    SMERR_OW_OUT_OF_BOUNDS, // Specified length exceeds out of memory bounds.
+    SMERR_OW_WRITE_MEM_FAILED,
+    SMERR_OW_MULTIDROP_ID_UNREADABLE,
+    SMERR_OW_WRITE_SCRATCHPAD_PRESELECT,
+    SMERR_OW_WRITE_SCRATCHPAD_CRC16,
+    SMERR_OW_READ_SCRATCHPAD_PRESELECT,
+    SMERR_OW_READ_SCRATCHPAD_CRC16,
+    SMERR_OW_SCRATCHPAD_PF, // Power loss or scratchpad not full
+    SMERR_OW_WRITTEN_SCRATCHPAD_MISMATCH,
+    SMERR_OW_COPY_SCRATCHPAD_PRESELECT,
+    SMERR_OW_COPY_SCRATCHPAD,
     SMERR_UnkownCommand = 0xC0,
     SMERR_ERRORS = SMERR_UnkownCommand,
     SMERR_Framing,
@@ -131,7 +156,7 @@ class SwiMuxComms_t {
     SwiMuxError_e decode(const uint8_t byte, uint8_t*& payload, size_t& payloadLength);
 
     bool waitForAckTo(const SwiMuxOpcodes_e opCode, SwiMuxDelegateFunc_t<unsigned long()> getTime_ms, SwiMuxDelegateFunc_t<int(void)> readFunc,
-      SwiMuxDelegateFunc_t<void(unsigned long)> delay_ms_func = {});
+      SwiMuxDelegateFunc_t<void(unsigned long)> delay_ms_func = {}, uint32_t timeout_ms = 0);
 
     void resync(SwiMuxDelegateFunc_t<void(uint8_t)> writer, SwiMuxDelegateFunc_t<void(unsigned long)> delay_ms_func = {}, bool do_reset = true);
 

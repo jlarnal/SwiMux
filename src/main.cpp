@@ -134,7 +134,7 @@ void setup()
 static void processWakeup(), processRead(), processWrite(), processGetUID(), processRollCall(), processSleep(bool autoSleep = false),
   processPresenceReport();
 static void sendAck(SwiMuxOpcodes_e opcode);
-static void sendNack(SwiMuxError_e error);
+static void sendNack(SwiMuxError_e error, SwiMuxOpcodes_e opcode);
 static void sendAckArgs(SwiMuxOpcodes_e opcode, uint8_t arg);
 static void sendUid(SwiMuxRespUID_t& uidResp);
 
@@ -167,7 +167,7 @@ int main(void)
         while (uart_available() > 0) {
             SwiMuxError_e err = decoder.decode(uart_getC(), g_payload, plength);
             if (err >= SMERR_ERRORS) {
-                sendNack(err);
+                sendNack(err, SMCMD_ZERO);
                 continue;
             }
             if (g_payload == nullptr || plength == 0) {
@@ -200,7 +200,7 @@ int main(void)
                     processPresenceReport(); // just acknowledge the command. "I'm here !"
                     break;
                 default:
-                    sendNack(SMERR_UnkownCommand);
+                    sendNack(SMERR_UnkownCommand, (SwiMuxOpcodes_e)g_payload[0]);
                     break;
             }
             Delay_Us(5);
@@ -223,20 +223,20 @@ static void processWakeup()
 static void processRead()
 {
     if (plength < 5) { // not enough bytes  (opcode + ~opcode + bus index + address + length)
-        sendNack(SwiMuxError_e::SMERR_ReadBytesParams);
+        sendNack(SwiMuxError_e::SMERR_ReadBytesParams,SMCMD_ReadBytes);
         return;
     }
     SwiMuxCmdRead_t* pCmd = (SwiMuxCmdRead_t*)g_payload;
     if (pCmd->busIndex > 5) {
-        sendNack(SwiMuxError_e::SMERR_BusIndexOutOfRange);
+        sendNack(SwiMuxError_e::SMERR_BusIndexOutOfRange, SMCMD_ReadBytes);
         return;
     }
     if (pCmd->offset >= 128) {
-        sendNack(SMERR_MemOffsetOutOfRange);
+        sendNack(SMERR_MemOffsetOutOfRange, SMCMD_ReadBytes);
         return;
     }
     if ((pCmd->offset + pCmd->length) > DS28E07::MemorySize_Bytes) {
-        sendNack(SMERR_ReadLengthOutOfRange);
+        sendNack(SMERR_ReadLengthOutOfRange, SMCMD_ReadBytes);
         return;
     }
 
@@ -247,11 +247,11 @@ static void processRead()
     if (devs[pCmd->busIndex].read(pCmd->offset, &usart_tx_mem[sizeof(SwiMuxCmdRead_t)], pCmd->length) == pCmd->length) {
         // Device read successful.
         if (decoder.encode(usart_tx_mem, pCmd->length + sizeof(SwiMuxCmdRead_t), uart_writeByte) == false) {
-            sendNack(SMERR_ResponseEncodingFailed); // failed to read
+            sendNack(SMERR_ResponseEncodingFailed ,SMCMD_ReadBytes); // failed to read
         } // otherwise the `encode` success is producing the ACK itself on the serial line.
     } else {
         // Device read failed !
-        sendNack(SMERR_ReadMemoryFailed);
+        sendNack(SMERR_ReadMemoryFailed, SMCMD_ReadBytes);
     }
 }
 
@@ -261,7 +261,7 @@ void processRollCall()
 {
 
     if (plength < 2) {
-        sendNack(SMERR_Framing);
+        sendNack(SMERR_Framing, SMCMD_RollCall);
         return;
     }
 
@@ -277,46 +277,50 @@ void processRollCall()
     __NOP();
     // Now send `answer`
     if (!decoder.encode((const uint8_t*)&answer, sizeof(SwiMuxRollCallResult_t), uart_writeByte)) {
-        sendNack(SMERR_ResponseEncodingFailed); // Could not encode `answer` .
+        sendNack(SMERR_ResponseEncodingFailed, SMCMD_RollCall); // Could not encode `answer` .
     }
 }
 
+static volatile uint32_t timeOfWrite_us = 0UL;
 
 static void processWrite()
 {
     SwiMuxCmdWrite_t* cmd = (SwiMuxCmdWrite_t*)g_payload;
     if (cmd->busIndex > 5) {
-        sendNack(SwiMuxError_e::SMERR_BusIndexOutOfRange);
+        sendNack(SwiMuxError_e::SMERR_BusIndexOutOfRange, SMCMD_WriteBytes);
         return;
     }
     if (cmd->offset >= 128) {
-        sendNack(SMERR_MemOffsetOutOfRange);
+        sendNack(SMERR_MemOffsetOutOfRange, SMCMD_WriteBytes);
         return;
     }
     if ((cmd->offset + cmd->length) > DS28E07::MemorySize_Bytes) {
-        sendNack(SMERR_WriteLengthOutOfRange);
+        sendNack(SMERR_WriteLengthOutOfRange, SMCMD_WriteBytes);
         return;
     }
 
-    uint16_t written = 0;
+    uint32_t timeOnSend = SysTick->CNT, timeOnAck;
+    uint16_t written    = 0;
     // Write data from the first byte after cmd->len (that's our received payload).
     written = devs[cmd->busIndex].write((const uint16_t)cmd->offset, &(&cmd->length)[1], cmd->length);
     if (written != cmd->length) {
-        sendNack(SMERR_WriteFailed);
+        sendNack((SwiMuxError_e)devs[cmd->busIndex].getLastError(), SMCMD_WriteBytes);
     } else { // Acknowledge with the effective count of written bytes.
         sendAckArgs(SMCMD_WriteBytes, written);
+        timeOnAck      = SysTick->CNT;
+        timeOfWrite_us = (uint32_t)(((timeOnAck - timeOnSend) * 8000ULL) / FUNCONF_SYSTEM_CORE_CLOCK);
     }
 }
 
 static void processGetUID()
 {
     if (plength < 3) {
-        sendNack(SMERR_Framing);
+        sendNack(SMERR_Framing, SMCMD_GetUID);
         return;
     }
     SwiMuxGetUID_t* cmd = (SwiMuxGetUID_t*)g_payload;
     if (cmd->busIndex >= NUMBER_OF_BUSES) {
-        sendNack(SwiMuxError_e::SMERR_BusIndexOutOfRange);
+        sendNack(SwiMuxError_e::SMERR_BusIndexOutOfRange, SMCMD_GetUID);
         return;
     }
     SwiMuxRespUID_t uidResp;
@@ -332,7 +336,7 @@ static void processGetUID()
         // Send the Guid response packet
         sendUid(uidResp);
     } else {
-        sendNack(SMERR_GuidUnreadable);
+        sendNack(SMERR_GuidUnreadable, SMCMD_GetUID);
     }
 }
 
@@ -343,8 +347,7 @@ static void processSleep(bool autoSleep)
 
 #ifndef AUTOSLEEP_ENABLED
     if (!autoSleep) {
-        sendNack(SwiMuxError_e::SMERR_CommandDisabled);
-        
+        sendNack(SwiMuxError_e::SMERR_CommandDisabled,, SMCMD_Sleep);
     }
 #else
     if (!autoSleep) {
@@ -395,10 +398,10 @@ static void processPresenceReport()
 
 
 /**  @brief Sends a error packet. */
-static void sendNack(SwiMuxError_e error)
+static void sendNack(SwiMuxError_e error, SwiMuxOpcodes_e opcode)
 {
-    uint8_t msg[3] = { SMCMD_Nack, (uint8_t)(0xFF & ~SMCMD_Nack), error };
-    decoder.encode(msg, 3, uart_writeByte);
+    uint8_t msg[4] = { SMCMD_Nack, (uint8_t)(0xFF & ~SMCMD_Nack), error, opcode };
+    decoder.encode(msg, 4, uart_writeByte);
 }
 
 /**  @brief Sends an acknowledgement packet. */

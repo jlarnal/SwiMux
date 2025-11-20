@@ -168,10 +168,10 @@ sample code bearing this copyright.
 #include <stdint.h>
 
 
-enum OneWireError_e : uint
+enum OneWireError_e : uint8_t
 {
     NO_ERROR = 0,
-    DIO_PORT_NULL,
+    DIO_PORT_NULL = 0x80,
     DIO_PORT_INVALID,
     DIO_PIN_INVALID,
     PULLUP_PORT_INVALID,

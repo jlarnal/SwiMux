@@ -187,6 +187,10 @@ uint16_t DS28E07::write(const uint16_t address, const uint8_t* data, const uint1
     uint16_t remains = length;
     uint16_t offset  = address & 7; // offset of the 1st byte on 8-bytes boundaries.
     scpArgs.address  = address - offset;
+    // FIX 1: Initialize arguments properly
+    scpArgs.retries   = retries;
+    scpArgs.multidrop = multidrop;
+    scpArgs.overdrive = overdrive;
 
     // Ensure the device is selected
     if (!assertSelected(multidrop, overdrive))
@@ -208,7 +212,9 @@ uint16_t DS28E07::write(const uint16_t address, const uint8_t* data, const uint1
         // We overwrite the bytes we initialy wanted to write...
         memcpy(&tmp[offset], data, 8 - offset);
         // And then we overwrite the 8-bytes clump itself
-        scpArgs = ScratchPadWCP_Arg_t((uint16_t)(address - offset), tmp, retries, multidrop, overdrive);
+        scpArgs.buffer = tmp;
+        scpArgs.retries = retries; // Ensure retries are reset
+        
         if (!scratch_wrt_chk_cpy(scpArgs)) {
             // _lastError has been set by `scratch_wrt_chk_cpy` itself.
             return 0;
@@ -222,6 +228,7 @@ uint16_t DS28E07::write(const uint16_t address, const uint8_t* data, const uint1
     // Then, as long as there's more than 7 bytes to write
     while (remains > 7) {
         scpArgs.buffer = data;
+        scpArgs.retries = retries; // Ensure retries are reset for every block
         if (!scratch_wrt_chk_cpy(scpArgs)) {
             return length - remains;
         }
@@ -241,6 +248,7 @@ uint16_t DS28E07::write(const uint16_t address, const uint8_t* data, const uint1
         }
         memcpy(tmp, data, remains);
         scpArgs.buffer = tmp;
+        scpArgs.retries = retries; // Ensure retries are reset
         if (!scratch_wrt_chk_cpy(scpArgs)) {
             // _lastError has been set by `scratch_wrt_chk_cpy` itself.
             return length - remains;
@@ -369,7 +377,7 @@ bool DS28E07::scratch_wrt_chk_cpy(ScratchPadWCP_Arg_t& args)
         wsp->payload.cmd = OW_WRITE_SCRATCHPAD;
         wsp->payload.T1  = args.address & 0xF8; // aligned on 8 bytes, as per datasheet says, so we dismiss bits [2:0].
         wsp->payload.T2  = (args.address >> 8); // always 0 on the DS28E07, but we do it anyways.
-        memcpy(wsp->payload.scratchpad, args.buffer, 8); // copy our given contents.
+        memcpy(&wsp->payload.scratchpad[0], args.buffer, 8); // copy our given contents.
 
         _ow.writeBytes(wsp->payload.bytes, sizeof(wsp->payload)); // command, TA1, TA2 and scratchpad (1+1+1+8)
         _ow.read(wsp->crc16.bytes, 2); // read the crc16 the DS28E07 responds with
@@ -416,9 +424,13 @@ bool DS28E07::scratch_wrt_chk_cpy(ScratchPadWCP_Arg_t& args)
             _lastError = OneWireError_e::COPY_SCRATCHPAD;
             continue;
         }
+
+        // FIX 2: Return true if the sequence completes successfully
+        return true;
     }
 
-    return args.retries < 0;
+    // FIX 3: Return false if retries exhausted
+    return false;
 }
 
 
