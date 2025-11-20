@@ -91,9 +91,12 @@ bool SwiMuxComms_t::waitForAckTo(const SwiMuxOpcodes_e opCode, SwiMuxDelegateFun
                 if (pLen != 0 && payload != nullptr) {
                     // Check if it's the ACK we are looking for
                     if (pLen >= 3) {
-                        if (payload[0] == (uint8_t)SwiMuxOpcodes_e::SMCMD_Ack && payload[1] == ((uint8_t)0xFF ^ payload[0])
-                          && payload[2] == (uint8_t)opCode) {
-                            return true; // Success!
+                        if (payload[1] == ((uint8_t)0xFF ^ payload[0])) {
+                            if (payload[0] == (uint8_t)SwiMuxOpcodes_e::SMCMD_Ack && payload[2] == (uint8_t)opCode) {
+                                return true; // Success!
+                            } else if (payload[0] == SwiMuxOpcodes_e::SMCMD_Nack) {
+                                _lastAckError = (SwiMuxError_e)payload[2];
+                            }
                         }
                     }
                     // --- FIX 1 ---

@@ -27,11 +27,11 @@ enum SwiMuxOpcodes_e : uint8_t
     SMCMD_Nack,
 };
 
-enum SwiMuxError_e : uint8_t
+enum SwiMuxError_e : uint8_t // Include proprietary values as well as values from OneWireError_e .
 {
-    SMERR_Ok            = 0,
-    SMERR_InProgress    = SMERR_Ok,
-    SMERR_Done          = 1,
+    SMERR_Ok               = 0,
+    SMERR_InProgress       = SMERR_Ok,
+    SMERR_Done             = 1,
     SMERR_OW_DIO_PORT_NULL = 0x80,
     SMERR_OW_DIO_PORT_INVALID,
     SMERR_OW_DIO_PIN_INVALID,
@@ -58,7 +58,7 @@ enum SwiMuxError_e : uint8_t
     SMERR_OW_COPY_SCRATCHPAD_PRESELECT,
     SMERR_OW_COPY_SCRATCHPAD,
     SMERR_UnkownCommand = 0xC0,
-    SMERR_ERRORS = SMERR_UnkownCommand,
+    SMERR_ERRORS        = SMERR_UnkownCommand,
     SMERR_Framing,
     SMERR_WrongEscape,
     SMERR_ReadBytesParams,
@@ -75,7 +75,7 @@ enum SwiMuxError_e : uint8_t
     SMERR_CommandDisabled,
 };
 
-union __attribute__((packed)) UidType_t {        
+union __attribute__((packed)) UidType_t {
     uint8_t bytes_LE[8];
     uint64_t value;
 };
@@ -138,11 +138,11 @@ const uint8_t SwiMuxRequest_Sleep[2]       = { SMCMD_Sleep, (uint8_t)(0xFF & ~SM
 
 
 
-
 class SwiMuxComms_t {
   public:
     SwiMuxComms_t()
         : _calculated_crc(0),
+          _lastAckError(SMERR_Ok),
 #ifdef SWIMUX_USES_COBS
           _code(0),
 #endif
@@ -167,6 +167,8 @@ class SwiMuxComms_t {
     void sendAck(SwiMuxOpcodes_e opcode, SwiMuxDelegateFunc_t<void(uint8_t)> writer);
     void sendAckArgs(SwiMuxOpcodes_e opcode, uint8_t arg, SwiMuxDelegateFunc_t<void(uint8_t)> writer);
 
+    inline SwiMuxError_e getLastAckError() { return _lastAckError; }
+
   private:
     static constexpr uint8_t ESC     = 0xDB;
     static constexpr uint8_t ESC_ESC = 0xDD;
@@ -176,6 +178,7 @@ class SwiMuxComms_t {
     static constexpr size_t SWIMUX_BUFF_SIZE = 150;
     StaticBuffer_t<SWIMUX_BUFF_SIZE> _buffer;
     uint32_t _calculated_crc, _crc_consumed;
+    SwiMuxError_e _lastAckError;
 #ifdef SWIMUX_USES_COBS
     uint8_t _code;
 #endif
