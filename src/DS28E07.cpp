@@ -163,7 +163,6 @@ bool DS28E07::assertSelected(bool multidrop, bool overdrive)
     return true;
 }
 
-
 uint16_t DS28E07::write(const uint16_t address, const uint8_t* data, const uint16_t length, bool multidrop, bool overdrive, uint8_t retries)
 {
     if (data == nullptr) {
@@ -178,87 +177,177 @@ uint16_t DS28E07::write(const uint16_t address, const uint8_t* data, const uint1
         _lastError = OneWireError_e::MEMADDRESS_OUT_OF_BOUNDS;
         return 0;
     }
-    if ((address + length) > MemorySize_Bytes) { // too much for the DS28E07.
+    if ((address + length) > MemorySize_Bytes) {
         _lastError = OneWireError_e::OUT_OF_BOUNDS;
         return 0;
     }
 
     ScratchPadWCP_Arg_t scpArgs;
     uint16_t remains = length;
-    uint16_t offset  = address & 7; // offset of the 1st byte on 8-bytes boundaries.
+    uint16_t offset  = address & 7;
     scpArgs.address  = address - offset;
-    // FIX 1: Initialize arguments properly
     scpArgs.retries   = retries;
     scpArgs.multidrop = multidrop;
     scpArgs.overdrive = overdrive;
 
-    // Ensure the device is selected
     if (!assertSelected(multidrop, overdrive))
         return 0;
 
-    // Start writing. In case of unaligned address,
-    // we'll have to perform a READ-MODIFY-WRITE, overwriting the 8-bytes chunk last bytes.
-    if (offset) { // unaligned starting write address ?
-        // We'll read the aligned block of 8 bytes the first bytes to write belongs to.
+    // --- HEAD: Handle unaligned start ---
+    if (offset) {
         uint8_t tmp[8];
         uint16_t bytesInChunk = 8 - offset;
+        
+        // Cap bytes to copy by what's actually remaining
+        if (bytesInChunk > remains) {
+            bytesInChunk = remains;
+        }
+
         if (read(address - offset, tmp, 8, multidrop, overdrive) != 8) {
             _lastError = OneWireError_e::ALIGNED_WRITE_HEAD_PREREAD;
             return 0;
         }
 
-
-
-        // We overwrite the bytes we initialy wanted to write...
-        memcpy(&tmp[offset], data, 8 - offset);
-        // And then we overwrite the 8-bytes clump itself
+        memcpy(&tmp[offset], data, bytesInChunk);
+        
         scpArgs.buffer = tmp;
-        scpArgs.retries = retries; // Ensure retries are reset
+        scpArgs.retries = retries; 
         
         if (!scratch_wrt_chk_cpy(scpArgs)) {
-            // _lastError has been set by `scratch_wrt_chk_cpy` itself.
             return 0;
         }
-        data += bytesInChunk; // advance our source pointer
+        data += bytesInChunk; 
         scpArgs.address += 8;
         remains -= bytesInChunk;
     }
 
-
-    // Then, as long as there's more than 7 bytes to write
+    // --- BODY: Full 8-byte blocks ---
     while (remains > 7) {
         scpArgs.buffer = data;
-        scpArgs.retries = retries; // Ensure retries are reset for every block
+        scpArgs.retries = retries; 
         if (!scratch_wrt_chk_cpy(scpArgs)) {
             return length - remains;
         }
-        data += 8; // advance our source pointer
+        data += 8; 
         remains -= 8;
         scpArgs.address += 8;
     }
 
-    // Are there still bytes to write (but not more than 7).
-    // If so, it's a READ-MODIFY-WRITE again,
-    // but we overwite the starting bytes of the chunk this time.
+    // --- TAIL: Remaining bytes ---
     if (remains) {
         uint8_t tmp[8];
         if (read(scpArgs.address, tmp, 8, multidrop, overdrive) != 8) {
             _lastError  = OneWireError_e::ALIGNED_WRITE_TAIL_PREREAD;
             _isSelected = false;
+            return length - remains; // Return what we managed to write so far
         }
         memcpy(tmp, data, remains);
         scpArgs.buffer = tmp;
-        scpArgs.retries = retries; // Ensure retries are reset
+        scpArgs.retries = retries; 
         if (!scratch_wrt_chk_cpy(scpArgs)) {
-            // _lastError has been set by `scratch_wrt_chk_cpy` itself.
             return length - remains;
         }
-        remains = 0; // just for tidyness, if we expand this method further.
+        remains = 0; 
     }
-    // We're done, the whole buffer has been written, aligned or not.
 
     return length;
 }
+
+//uint16_t DS28E07::write(const uint16_t address, const uint8_t* data, const uint16_t length, bool multidrop, bool overdrive, uint8_t retries)
+//{
+//    if (data == nullptr) {
+//        _lastError = OneWireError_e::NULL_INPUT_BUFFER;
+//        return 0;
+//    }
+//    if (length == 0)
+//        return 0;
+//    if (retries == 0)
+//        retries = DEFAULT_RETRIES_COUNT;
+//    if (address >= MemorySize_Bytes) {
+//        _lastError = OneWireError_e::MEMADDRESS_OUT_OF_BOUNDS;
+//        return 0;
+//    }
+//    if ((address + length) > MemorySize_Bytes) { // too much for the DS28E07.
+//        _lastError = OneWireError_e::OUT_OF_BOUNDS;
+//        return 0;
+//    }
+//
+//    ScratchPadWCP_Arg_t scpArgs;
+//    uint16_t remains = length;
+//    uint16_t offset  = address & 7; // offset of the 1st byte on 8-bytes boundaries.
+//    scpArgs.address  = address - offset;
+//    // FIX 1: Initialize arguments properly
+//    scpArgs.retries   = retries;
+//    scpArgs.multidrop = multidrop;
+//    scpArgs.overdrive = overdrive;
+//
+//    // Ensure the device is selected
+//    if (!assertSelected(multidrop, overdrive))
+//        return 0;
+//
+//    // Start writing. In case of unaligned address,
+//    // we'll have to perform a READ-MODIFY-WRITE, overwriting the 8-bytes chunk last bytes.
+//    if (offset) { // unaligned starting write address ?
+//        // We'll read the aligned block of 8 bytes the first bytes to write belongs to.
+//        uint8_t tmp[8];
+//        uint16_t bytesInChunk = 8 - offset;
+//        if (read(address - offset, tmp, 8, multidrop, overdrive) != 8) {
+//            _lastError = OneWireError_e::ALIGNED_WRITE_HEAD_PREREAD;
+//            return 0;
+//        }
+//
+//
+//
+//        // We overwrite the bytes we initialy wanted to write...
+//        memcpy(&tmp[offset], data, 8 - offset);
+//        // And then we overwrite the 8-bytes clump itself
+//        scpArgs.buffer = tmp;
+//        scpArgs.retries = retries; // Ensure retries are reset
+//        
+//        if (!scratch_wrt_chk_cpy(scpArgs)) {
+//            // _lastError has been set by `scratch_wrt_chk_cpy` itself.
+//            return 0;
+//        }
+//        data += bytesInChunk; // advance our source pointer
+//        scpArgs.address += 8;
+//        remains -= bytesInChunk;
+//    }
+//
+//
+//    // Then, as long as there's more than 7 bytes to write
+//    while (remains > 7) {
+//        scpArgs.buffer = data;
+//        scpArgs.retries = retries; // Ensure retries are reset for every block
+//        if (!scratch_wrt_chk_cpy(scpArgs)) {
+//            return length - remains;
+//        }
+//        data += 8; // advance our source pointer
+//        remains -= 8;
+//        scpArgs.address += 8;
+//    }
+//
+//    // Are there still bytes to write (but not more than 7).
+//    // If so, it's a READ-MODIFY-WRITE again,
+//    // but we overwite the starting bytes of the chunk this time.
+//    if (remains) {
+//        uint8_t tmp[8];
+//        if (read(scpArgs.address, tmp, 8, multidrop, overdrive) != 8) {
+//            _lastError  = OneWireError_e::ALIGNED_WRITE_TAIL_PREREAD;
+//            _isSelected = false;
+//        }
+//        memcpy(tmp, data, remains);
+//        scpArgs.buffer = tmp;
+//        scpArgs.retries = retries; // Ensure retries are reset
+//        if (!scratch_wrt_chk_cpy(scpArgs)) {
+//            // _lastError has been set by `scratch_wrt_chk_cpy` itself.
+//            return length - remains;
+//        }
+//        remains = 0; // just for tidyness, if we expand this method further.
+//    }
+//    // We're done, the whole buffer has been written, aligned or not.
+//
+//    return length;
+//}
 
 
 

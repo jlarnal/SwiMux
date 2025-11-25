@@ -54,10 +54,10 @@
 #define OW_PUPPIN_BUS4 (-1)
 #define OW_PUPPIN_BUS5 (-1)
 
-//#define OW_DIO_INPUT_PULLSUP /* weakly pulls the line up - not recommended yet */
+
 
 #define AUTOSLEEP_ENABLED
-//#define ADD_CONSOLE_DEBUGGING
+
 #ifdef ADD_CONSOLE_DEBUGGING
 #define DO_ERASURE_TEST
 //#define FULL_ERASE_AFTER_TEST

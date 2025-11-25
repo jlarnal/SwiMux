@@ -2,7 +2,7 @@
 #define H_DEBUG_MACROS_H
 
 
-#define DEBUG_ENABLED
+//#define DEBUG_ENABLED
 
 #ifdef DEBUG_ENABLED
 #define DebugInit() DebugPrintfBufferFree()
